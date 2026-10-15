@@ -1,21 +1,30 @@
-import type { RouteRecordRaw } from 'vue-router';
+import type { RouteRecordRaw } from 'vue-router'
 
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/layouts/MainLayout.vue'),
+    meta: { requiresAuth: true },
     children: [
-      { path: '', component: () => import('@/pages/IndexPage.vue') },
-      { path: 'second', component: () => import('@/pages/SecondPage.vue') },
-    ],
+      { path: '', redirect: '/dashboard' },
+      { path: 'dashboard', component: () => import('@/pages/DashboardPage.vue') },
+      { path: 'system-registry', component: () => import('@/pages/SystemRegistryPage.vue'), meta: { title: 'System Registry' } },
+      { path: 'account', component: () => import('@/pages/AccountPage.vue') },
+      { path: 'change-password', component: () => import('@/pages/ChangePasswordPage.vue') }
+    ]
   },
-
-  // Always leave this as last one,
-  // but you can also remove it
   {
-    path: '/:catchAll(.*)*',
-    component: () => import('@/pages/ErrorNotFound.vue'),
+    path: '/',
+    component: () => import('@/layouts/AuthLayout.vue'),
+    children: [
+      { path: 'login', component: () => import('@/pages/LoginPage.vue'), meta: { guest: true } },
+      { path: 'login-otp', component: () => import('@/pages/LoginOtpPage.vue'), meta: { guest: true } },
+      { path: 'register', component: () => import('@/pages/RegisterPage.vue'), meta: { guest: true } },
+      { path: 'verify-email', component: () => import('@/pages/VerifyEmailPage.vue'), meta: { guest: true } },
+      { path: 'forgot-password', component: () => import('@/pages/ForgotPasswordPage.vue'), meta: { guest: true } },
+      { path: 'reset-password', component: () => import('@/pages/ResetPasswordPage.vue'), meta: { guest: true } }
+    ]
   },
-];
-
-export default routes;
+  { path: '/:catchAll(.*)*', component: () => import('@/pages/NotFoundPage.vue') }
+]
+export default routes
