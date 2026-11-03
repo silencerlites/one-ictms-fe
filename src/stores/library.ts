@@ -1,66 +1,72 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, reactive } from 'vue'
 import { libraryApi } from '@/services/library-api'
 import type { LibraryOption } from '@/services/library-api'
-import { clearLibraryCache, readLibraryCache, writeLibraryCache } from '@/services/library-cache'
+import {
+  LIBRARY_KINDS, clearLibraryCache, readLibraryCache, writeLibraryCache,
+} from '@/services/library-cache'
+import type { CachedKind } from '@/services/library-cache'
 import { errorMessage } from '@/services/http'
 
-export type LibraryKind = 'departments' | 'divisions' | 'positions'
+export type LibraryKind = CachedKind
 const CACHE_MS = 5 * 60 * 1000
-const KINDS: readonly LibraryKind[] = ['departments', 'divisions', 'positions']
+
+function initialValues<T>(create: () => T): Record<LibraryKind, T> {
+  return Object.fromEntries(LIBRARY_KINDS.map((kind) => [kind, create()])) as Record<LibraryKind, T>
+}
 
 export const useLibraryStore = defineStore('library', () => {
-  const departments = ref<LibraryOption[]>([])
-  const divisions = ref<LibraryOption[]>([])
-  const positions = ref<LibraryOption[]>([])
-  const updatedAt = ref<Record<LibraryKind, number>>({ departments: 0, divisions: 0, positions: 0 })
-  const errors = ref<Partial<Record<LibraryKind, string>>>({})
-  const pending = ref<Record<LibraryKind, boolean>>({ departments: false, divisions: false, positions: false })
+  const items = reactive(initialValues<LibraryOption[]>(() => []))
+  const updatedAt = reactive(initialValues(() => 0))
+  const pending = reactive(initialValues(() => false))
+  const errors = reactive<Partial<Record<LibraryKind, string>>>({})
+  const generation = initialValues(() => 0)
   const inFlight: Partial<Record<LibraryKind, Promise<void>>> = {}
-  const generation: Record<LibraryKind, number> = { departments: 0, divisions: 0, positions: 0 }
 
-  function assign(kind: LibraryKind, items: LibraryOption[]): void {
-    if (kind === 'departments') departments.value = items
-    else if (kind === 'divisions') divisions.value = items
-    else positions.value = items
-  }
+  // Preserve existing store properties so current Quasar pages remain compatible.
+  const departments = computed(() => items.departments)
+  const divisions = computed(() => items.divisions)
+  const positions = computed(() => items.positions)
+  const developmentTypes = computed(() => items.developmentTypes)
+  const managingTypes = computed(() => items.managingTypes)
+  const developmentSolutionTypes = computed(() => items.developmentSolutionTypes)
+  const stakeholderTypes = computed(() => items.stakeholderTypes)
+  const documentTypes = computed(() => items.documentTypes)
+  const registryStatuses = computed(() => items.registryStatuses)
+  const techStacks = computed(() => items.techStacks)
 
   async function load(kind: LibraryKind, force = false): Promise<void> {
     if (inFlight[kind]) return inFlight[kind]
-    if (!force && updatedAt.value[kind] && Date.now() - updatedAt.value[kind] < CACHE_MS) return
+    if (!force && updatedAt[kind] && Date.now() - updatedAt[kind] < CACHE_MS) return
 
-    pending.value[kind] = true
-    delete errors.value[kind]
+    pending[kind] = true
+    delete errors[kind]
     const currentGeneration = generation[kind]
     const promise = (async () => {
       try {
-        // Restore encrypted, unexpired data after browser refresh.
-        // Force-refresh bypasses persisted cache entirely.
-        if (!force && !updatedAt.value[kind]) {
+        if (!force && !updatedAt[kind]) {
           try {
             const cached = await readLibraryCache(kind)
             if (currentGeneration !== generation[kind]) return
             if (cached) {
-              assign(kind, cached.items)
-              updatedAt.value[kind] = cached.updatedAt
+              items[kind] = cached.items
+              updatedAt[kind] = cached.updatedAt
               return
             }
-          } catch {
-            // Private mode / denied IndexedDB / insecure context: use network.
-          }
+          } catch { /* Browser may disallow IndexedDB; fall back to HTTP. */ }
         }
         const records = await libraryApi[kind]()
         if (currentGeneration !== generation[kind]) return
         const timestamp = Date.now()
-        assign(kind, records)
-        updatedAt.value[kind] = timestamp
-        // The API response stays authoritative if persistence is unavailable.
-        try { await writeLibraryCache(kind, records, timestamp) } catch { /* optional cache */ }
+        items[kind] = records
+        updatedAt[kind] = timestamp
+        try { await writeLibraryCache(kind, records, timestamp) }
+        catch { /* Optional persistence never blocks UI. */ }
       } catch (error) {
-        errors.value[kind] = errorMessage(error)
+        if (currentGeneration === generation[kind]) errors[kind] = errorMessage(error)
         throw error
       } finally {
-        pending.value[kind] = false
+        pending[kind] = false
       }
     })()
     inFlight[kind] = promise
@@ -68,33 +74,54 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   async function loadAll(force = false): Promise<void> {
-    const results = await Promise.allSettled(KINDS.map((kind) => load(kind, force)))
+    const results = await Promise.allSettled(
+      (['departments', 'divisions', 'positions'] as const).map((kind) => load(kind, force)),
+    )
     if (results.every((result) => result.status === 'rejected')) {
       throw new Error('Unable to load Department, Division, and Position data.')
     }
   }
 
-  const initialLoading = computed(() => KINDS.some((kind) => pending.value[kind] && !updatedAt.value[kind]))
-  const loading = computed(() => Object.values(pending.value).some(Boolean))
-  const loadError = computed(() => Object.values(errors.value).filter(Boolean).join(' '))
+  async function loadRegistryLibraries(force = false): Promise<void> {
+    const kinds = LIBRARY_KINDS.filter((kind) => !['departments', 'divisions', 'positions'].includes(kind))
+    const results = await Promise.allSettled(kinds.map((kind) => load(kind, force)))
+    if (results.every((result) => result.status === 'rejected')) {
+      throw new Error('Unable to load Registry Library data.')
+    }
+  }
 
-  // Invalidation also clears persistent entries; next load fetches the API.
+  async function loadAllLibraries(force = false): Promise<void> {
+    const results = await Promise.allSettled(LIBRARY_KINDS.map((kind) => load(kind, force)))
+    if (results.every((result) => result.status === 'rejected')) {
+      throw new Error('Unable to load Library data.')
+    }
+  }
+
+  const initialLoading = computed(() => LIBRARY_KINDS.some((kind) => pending[kind] && !updatedAt[kind]))
+  const loading = computed(() => LIBRARY_KINDS.some((kind) => pending[kind]))
+  const loadError = computed(() => Object.values(errors).filter(Boolean).join(' '))
+
   function invalidate(kind?: LibraryKind): void {
-    for (const item of kind ? [kind] : KINDS) {
+    for (const item of kind ? [kind] : LIBRARY_KINDS) {
       generation[item] += 1
-      updatedAt.value[item] = 0
-      assign(item, [])
+      updatedAt[item] = 0
+      items[item] = []
+      delete errors[item]
     }
     void clearLibraryCache(kind).catch(() => undefined)
   }
 
   function labelFor(kind: LibraryKind, id: number | null | undefined): string {
     if (id == null) return '—'
-    const source = kind === 'departments' ? departments.value : kind === 'divisions' ? divisions.value : positions.value
-    const record = source.find((option) => Number(option.id) === Number(id))
+    const record = items[kind].find((option) => Number(option.id) === Number(id))
     return record?.alias || record?.name || `Unavailable (ID: ${id})`
   }
 
-  return { departments, divisions, positions, pending, loading, initialLoading,
-    errors, loadError, updatedAt, load, loadAll, invalidate, labelFor }
+  return {
+    departments, divisions, positions, developmentTypes, managingTypes,
+    developmentSolutionTypes, stakeholderTypes, documentTypes, registryStatuses,
+    techStacks, items, pending, loading, initialLoading, errors, loadError,
+    updatedAt, load, loadAll, loadRegistryLibraries, loadAllLibraries,
+    invalidate, labelFor,
+  }
 })

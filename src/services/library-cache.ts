@@ -1,6 +1,12 @@
 import type { LibraryOption } from './library-api'
 
-export type CachedKind = 'departments' | 'divisions' | 'positions'
+export const LIBRARY_KINDS = [
+  'departments', 'divisions', 'positions',
+  'developmentTypes', 'managingTypes', 'developmentSolutionTypes',
+  'stakeholderTypes', 'documentTypes', 'registryStatuses', 'techStacks',
+] as const
+
+export type CachedKind = (typeof LIBRARY_KINDS)[number]
 
 interface CacheRecord {
   version: 1
@@ -18,10 +24,6 @@ const STORE = 'cache'
 const KEY_NAME = 'aes-key'
 const MAX_AGE = 5 * 60 * 1000
 
-function getIndexedDBError(error: DOMException | null, message: string): Error {
-  return error ?? new Error(message)
-}
-
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
@@ -30,7 +32,7 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE)
     }
     req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(getIndexedDBError(req.error, 'IndexedDB request failed.'))
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'))
   })
 }
 
@@ -39,7 +41,7 @@ function read<T>(db: IDBDatabase, id: string): Promise<T | undefined> {
     const tx = db.transaction(STORE, 'readonly')
     const req = tx.objectStore(STORE).get(id)
     req.onsuccess = () => resolve(req.result as T | undefined)
-    req.onerror = () => reject(getIndexedDBError(req.error, 'IndexedDB request failed.'))
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'))
   })
 }
 
@@ -48,8 +50,8 @@ function write(db: IDBDatabase, id: string, value: unknown): Promise<void> {
     const tx = db.transaction(STORE, 'readwrite')
     tx.objectStore(STORE).put(value, id)
     tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(getIndexedDBError(tx.error, 'IndexedDB transaction failed.'))
-    tx.onabort = () => reject(getIndexedDBError(tx.error, 'IndexedDB transaction aborted.'))
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction failed'))
   })
 }
 
@@ -58,8 +60,8 @@ function remove(db: IDBDatabase, id: string): Promise<void> {
     const tx = db.transaction(STORE, 'readwrite')
     tx.objectStore(STORE).delete(id)
     tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(getIndexedDBError(tx.error, 'IndexedDB transaction failed.'))
-    tx.onabort = () => reject(getIndexedDBError(tx.error, 'IndexedDB transaction aborted.'))
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction failed'))
   })
 }
 
@@ -83,20 +85,13 @@ export async function readLibraryCache(kind: CachedKind): Promise<CacheRecord | 
     if (!encrypted) return null
     try {
       const key = await getKey(db)
-      const iv = new Uint8Array<ArrayBuffer>(
-        new ArrayBuffer(encrypted.iv.byteLength),
-      )
-      iv.set(encrypted.iv)
-
-      const ciphertext = new Uint8Array<ArrayBuffer>(
-        new ArrayBuffer(encrypted.ciphertext.byteLength),
-      )
-      ciphertext.set(new Uint8Array(encrypted.ciphertext))
-
       const decoded = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv },
+        {
+          name: 'AES-GCM',
+          iv: new Uint8Array(encrypted.iv).buffer,
+        },
         key,
-        ciphertext,
+        encrypted.ciphertext,
       )
       const record = JSON.parse(new TextDecoder().decode(decoded)) as CacheRecord
       if (record.version !== 1 || !Array.isArray(record.items) ||
@@ -119,9 +114,11 @@ export async function writeLibraryCache(kind: CachedKind, items: LibraryOption[]
   const db = await openDb()
   try {
     const key = await getKey(db)
-    const iv = crypto.getRandomValues(new Uint8Array(12))
+    const iv = crypto.getRandomValues(new Uint8Array<ArrayBuffer>(new ArrayBuffer(12)))
     const data = new TextEncoder().encode(JSON.stringify({ version: 1, updatedAt, items }))
-    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data)
+    const plaintext = new Uint8Array<ArrayBuffer>(new ArrayBuffer(data.byteLength))
+    plaintext.set(data)
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext)
     await write(db, kind, { iv, ciphertext } satisfies EncryptedRecord)
   } finally { db.close() }
 }
@@ -130,7 +127,7 @@ export async function clearLibraryCache(kind?: CachedKind): Promise<void> {
   if (typeof indexedDB === 'undefined') return
   const db = await openDb()
   try {
-    for (const item of kind ? [kind] : ['departments', 'divisions', 'positions']) {
+    for (const item of kind ? [kind] : LIBRARY_KINDS) {
       await remove(db, item)
     }
   } finally { db.close() }
