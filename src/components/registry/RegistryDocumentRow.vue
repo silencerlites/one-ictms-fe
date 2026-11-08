@@ -9,53 +9,72 @@
         </q-icon>
       </div>
       <div class="registry-document-row__actions">
-        <!-- Step 1: responsibility must be assigned before preparing the document. -->
-        <q-btn
-          v-if="!assigneeName" no-caps outline color="indigo-8"
-          icon="person_add_alt_1" label="Assign User"
-          :aria-label="`Assign user to ${documentName}`"
-          @click="emit('assign', String(index))"
-        />
+        <!-- External management: the company provides the file; no internal assignee required. -->
+        <template v-if="managementMode === 'third-party'">
+          <q-btn no-caps outline color="indigo-8" icon="upload_file"
+            :label="hasDocument ? 'Replace' : 'Upload'"
+            :aria-label="`${hasDocument ? 'Replace' : 'Upload'} ${documentName}`"
+            @click="emit('upload', index)" />
+        </template>
+        <!-- Joint management: always show the three primary actions as icons. -->
+        <template v-else-if="managementMode === 'joint'">
+          <q-btn flat round color="indigo-8" :icon="assigneeName ? 'person_add_disabled' : 'person_add_alt_1'"
+            :disable="Boolean(assigneeName)"
+            :aria-label="`Assign user to ${documentName}`" @click="emit('assign', String(index))">
+            <q-tooltip>{{ assigneeName ? `Assigned to ${assigneeName}` : 'Assign User' }}</q-tooltip>
+          </q-btn>
+          <q-btn flat round color="indigo-8" :icon="hasDocument ? 'drive_folder_upload' : 'upload_file'"
+            :aria-label="`${hasDocument ? 'Replace' : 'Upload'} ${documentName}`" @click="emit('upload', index)">
+            <q-tooltip>{{ hasDocument ? 'Replace' : 'Upload' }}</q-tooltip>
+          </q-btn>
+          <q-btn v-if="!hasDocument" flat round color="indigo-8" icon="auto_awesome"
+            :aria-label="`Draft using AI for ${documentName}`" @click="emit('draft', index)">
+            <q-tooltip>Draft using AI (local template; AI endpoint not connected)</q-tooltip>
+          </q-btn>
+          <template v-if="hasDocument">
+            <q-btn flat round color="indigo-8" icon="visibility"
+              :aria-label="`View ${documentName}`" @click="emit('view', index)"><q-tooltip>View</q-tooltip></q-btn>
+            <q-btn flat round color="indigo-8" icon="edit"
+              :aria-label="`Edit ${documentName}`" @click="emit('edit', index)"><q-tooltip>Edit</q-tooltip></q-btn>
+          </template>
+        </template>
+        <!-- Internal management: preserve the original three-stage task workflow. -->
+        <template v-else-if="!assigneeName">
+          <q-btn no-caps outline color="indigo-8" icon="person_add_alt_1" label="Assign User"
+            :aria-label="`Assign user to ${documentName}`" @click="emit('assign', String(index))" />
+        </template>
         <template v-else-if="!hasDocument">
-          <!-- Step 2: assignee exists, but no file or draft has been prepared. -->
           <q-btn no-caps outline color="indigo-8" icon="upload_file" label="Upload"
             @click="emit('upload', index)" />
           <q-btn no-caps outline color="indigo-8" icon="auto_awesome" label="Draft using AI"
-            @click="emit('draft', index)">
-            <q-tooltip>Creates a local draft template. AI generation requires a backend integration.</q-tooltip>
-          </q-btn>
+            @click="emit('draft', index)"><q-tooltip>Creates a local draft template. AI generation requires a backend integration.</q-tooltip></q-btn>
           <q-btn flat round color="negative" icon="person_remove"
-            :aria-label="`Remove assigned user from ${documentName}`"
-            @click="emit('remove-assignee', String(index))">
-            <q-tooltip>Remove assignment</q-tooltip>
-          </q-btn>
+            :aria-label="`Remove assigned user from ${documentName}`" @click="emit('remove-assignee', String(index))"><q-tooltip>Remove Assignment</q-tooltip></q-btn>
         </template>
         <template v-else>
-          <!-- Step 3: uploaded/selected file OR prepared draft. -->
           <q-btn flat round color="indigo-8" icon="drive_folder_upload"
-            :aria-label="`Replace ${documentName}`" @click="emit('upload', index)">
-            <q-tooltip>Replace with a file</q-tooltip>
-          </q-btn>
+            :aria-label="`Replace ${documentName}`" @click="emit('upload', index)"><q-tooltip>Replace with a file</q-tooltip></q-btn>
           <q-btn flat round color="indigo-8" icon="visibility"
-            :aria-label="`View ${documentName}`" @click="emit('view', index)">
-            <q-tooltip>View document or draft</q-tooltip>
-          </q-btn>
+            :aria-label="`View ${documentName}`" @click="emit('view', index)"><q-tooltip>View document or draft</q-tooltip></q-btn>
           <q-btn flat round color="indigo-8" icon="edit"
-            :aria-label="`Edit ${documentName}`" @click="emit('edit', index)">
-            <q-tooltip>Edit document or draft</q-tooltip>
-          </q-btn>
+            :aria-label="`Edit ${documentName}`" @click="emit('edit', index)"><q-tooltip>Edit document or draft</q-tooltip></q-btn>
         </template>
         <input :id="`registry-file-${index}`" class="registry-document-row__file" type="file" @change="emit('file-selected', String(index), $event)" />
       </div>
     </div>
-    <div v-if="doc.file_path?.trim()" class="registry-document-row__stored-path">
+    <div v-if="doc.file_path?.trim() && (!isPendingPath || !hasDocument)" class="registry-document-row__stored-path">
       <q-icon :name="isPendingPath ? 'schedule' : 'attach_file'" size="16px" />
       <span class="registry-document-row__path-text">{{ isPendingPath ? 'Pending document (not uploaded)' : doc.file_path }}</span>
     </div>
     <div v-if="draftName || selectedFileName || assigneeName" class="registry-document-row__meta">
       <span v-if="draftName"><q-icon name="edit_note" /> {{ draftName }}</span>
       <span v-if="selectedFileName"><q-icon name="attach_file" /> {{ selectedFileName }} (selected locally)</span>
-      <span v-if="assigneeName"><q-icon name="person" /> {{ assigneeName }}</span>
+      <span v-if="assigneeName"><q-icon name="person" /> {{ assigneeName }}
+        <q-btn v-if="managementMode === 'joint'" flat dense round size="xs" color="negative" icon="close"
+          :aria-label="`Remove assigned user from ${documentName}`" @click="emit('remove-assignee', String(index))">
+          <q-tooltip>Remove Assignment</q-tooltip>
+        </q-btn>
+      </span>
     </div>
   </div>
 </template>
@@ -72,6 +91,7 @@ const props = defineProps<{
   selectedFileName: string
   draftName: string
   assigneeName: string
+  managementMode: 'internal' | 'third-party' | 'joint' | 'other' | 'unselected'
 }>()
 const isPendingPath = computed(() => /^__pending_(document|draft|upload)__\//.test(props.doc.file_path ?? ''))
 const hasFile = computed(() => Boolean((props.doc.file_path?.trim() && !isPendingPath.value) || props.selectedFileName))

@@ -233,7 +233,7 @@
                   <div class="registry-overview-block__heading"><span class="registry-overview-heading-icon"><q-icon name="groups" size="19px" /></span><h5>Stakeholders</h5></div>
                   <div v-if="detailStakeholders.length" class="registry-overview-list">
                     <div v-for="(person, index) in detailStakeholders" :key="`${person.user_id}-${index}`" class="registry-overview-list__row">
-                      <div class="registry-overview-list__main"><strong>{{ detailUserName(person.user_id) }}</strong><span>{{ person.stakeholder_type_name || library.labelFor('stakeholderTypes', person.stakeholder_type) || 'Unknown role' }}</span></div>
+                      <div class="registry-overview-list__main"><strong>{{ person.stakeholder_type_name || library.labelFor('stakeholderTypes', person.stakeholder_type) || 'Unknown role' }}</strong><span>{{ detailUserName(person.user_id) }}</span></div>
                     </div>
                   </div>
                   <div v-else class="registry-overview-empty">No stakeholders assigned.</div>
@@ -250,25 +250,74 @@
                 </div>
               </section>
             </div>
-            <div v-show="formStep === 2" class="registry-wizard-content">
+            <div v-show="formStep === 2" class="registry-wizard-content registry-management">
+              <section class="registry-management__card" aria-labelledby="registry-management-heading">
+                <div class="registry-management__heading">
+                  <span class="registry-management__icon"><q-icon name="corporate_fare" size="25px" /></span>
+                  <div>
+                    <h3 id="registry-management-heading">Management arrangement</h3>
+                    <p>Choose who manages the system. Related fields appear automatically.</p>
+                  </div>
+                </div>
+                <div class="registry-management__body">
+                  <q-select
+                    v-model="form.desc.managing_type"
+                    outlined clearable emit-value map-options
+                    label="Managing Type"
+                    :options="library.managingTypes"
+                    option-label="name" option-value="id"
+                    class="registry-management__type"
+                    @update:model-value="onManagingTypeChanged"
+                  >
+                  </q-select>
 
-            <div class="registry-form__grid">
-              <q-select v-model="form.desc.managing_type" outlined clearable label="Managing type" :options="library.managingTypes" option-label="name" option-value="id" emit-value map-options />
-              <q-select v-model="form.desc.managing_office" outlined clearable label="Managing office (Department)" :options="departmentOptions" option-label="name" option-value="id" emit-value map-options />
-              <q-input v-model.trim="form.desc.third_party_company" outlined label="Third-party company" />
-              <q-input v-model.number="form.desc.estimation_project_duration" outlined type="number" min="0" label="Estimated duration (days)" />
-              <q-input v-model="form.desc.project_roll_on" outlined type="date" label="Project roll-on" stack-label />
-              <q-input v-model="form.desc.project_sign_off" outlined type="date" label="Project sign-off" stack-label />
-            </div>
+                  <div
+                    v-if="showManagingOffice || showThirdPartyCompany"
+                    class="registry-management__conditional"
+                    :class="{ 'registry-management__conditional--both': showManagingOffice && showThirdPartyCompany }"
+                  >
+                    <q-select
+                      v-if="showManagingOffice"
+                      v-model="form.desc.managing_office"
+                      outlined clearable emit-value map-options
+                      label="Managing Office (Department)"
+                      :options="departmentOptions"
+                      option-label="name"
+                      option-value="id"
+                    />
+                    <q-input
+                      v-if="showThirdPartyCompany"
+                      v-model.trim="form.desc.third_party_company"
+                      outlined
+                      label="Third-Party Company"
+                    />
+                  </div>
+                </div>
+              </section>
 
+              <section class="registry-management__card" aria-labelledby="registry-management-schedule">
+                <div class="registry-management__heading">
+                  <span class="registry-management__icon"><q-icon name="event_note" size="25px" /></span>
+                  <div>
+                    <h3 id="registry-management-schedule">Project timeline</h3>
+                    <p>Track planned delivery dates and project duration.</p>
+                  </div>
+                </div>
+                <div class="registry-management__body registry-management__timeline">
+                  <q-input v-model="form.desc.project_roll_on" outlined type="date" label="Project Roll-On" stack-label />
+                  <q-input v-model="form.desc.project_sign_off" outlined type="date" label="Project Sign-Off" stack-label />
+                  <q-input v-model.number="form.desc.estimation_project_duration" outlined type="number" min="0" label="Estimated Development Duration (days)" class="registry-management__duration" />
+                </div>
+              </section>
             </div>
             <div v-show="formStep === 3" class="registry-wizard-content registry-documents">
-              <p class="text-caption text-grey-7 q-ma-none">Assign a user, then select a local file or create a draft template. Saving the Registry creates all four document records with pending markers until the documents are actually stored.</p>
+              <p class="text-caption text-grey-7 q-ma-none">{{ managementMode === 'third-party' ? 'Upload the document provided by the external company.' : managementMode === 'joint' ? 'Assign a responsible user, upload a document, or prepare a draft.' : 'Assign a responsible user before uploading or preparing a document draft.' }}</p>
               <RegistryDocumentRow
                 v-for="(doc, index) in form.docs.slice(0, 4)"
                 :key="doc.docs_type"
                 :doc="doc"
                 :index="index"
+                :management-mode="managementMode"
                 :document-name="library.labelFor('documentTypes', Number(doc.docs_type))"
                 :selected-file-name="documentFiles[String(index)] ?? ''"
                 :draft-name="documentDraftNames[String(index)] ?? ''"
@@ -335,104 +384,109 @@
                 </q-card-actions>
               </q-card>
             </q-dialog>
-            <div v-show="formStep === 4" class="registry-wizard-content">
+            <div v-show="formStep === 4" class="registry-wizard-content registry-stakeholders-layout">
+              <section class="registry-stakeholder-workflow" aria-labelledby="registry-assign-stakeholder-title">
+                <div class="registry-stakeholders-column__heading">
+                  <span class="registry-stakeholders-column__icon"><q-icon name="group_add" size="21px" /></span>
+                  <div><h3 id="registry-assign-stakeholder-title">Assign Stakeholders</h3><p>Select users from each available department and assign their roles.</p></div>
+                </div>
+                <div class="registry-stakeholders-grid">
+                    <section v-for="group in stakeholderSections" :key="group.key" class="registry-stakeholder-section">
+                      <div class="registry-stakeholder-section__title">
+                        <div>
+                          <strong>{{ group.title }}</strong>
+                          <div class="text-caption text-grey-7">{{ group.departmentId != null ? departmentLabel(group.departmentId) : 'No department selected' }}</div>
+                        </div>
+                        <q-chip dense color="indigo-1" text-color="indigo-9">{{ group.users.length }} users</q-chip>
+                      </div>
+                      <div v-if="group.departmentId == null" class="registry-stakeholder-empty">
+                        {{ group.key === 'owner' ? 'Select a Business Owner in the System Profile to assign department users.' : 'Select a Managing Office in the Management tab to assign department users.' }}
+                      </div>
+                      <div v-else-if="departmentUsersLoading && !departmentLoadedIds.includes(group.departmentId)" class="registry-stakeholder-empty row items-center justify-center q-gutter-sm">
+                        <q-spinner color="indigo-9" size="20px" /> Loading {{ group.title }} users...
+                      </div>
+                      <div v-else-if="departmentErrors[group.departmentId]" class="registry-stakeholder-empty">
+                        <div class="text-negative q-mb-sm">{{ departmentErrors[group.departmentId] }}</div>
+                        <q-btn outline no-caps color="indigo-9" label="Retry loading users" @click="reloadDepartmentUsers" />
+                      </div>
+                      <div v-else-if="group.users.length === 0" class="registry-stakeholder-empty">
+                        No users are available in this {{ group.title }} department.
+                        <div class="q-mt-sm"><q-btn flat no-caps color="indigo-9" icon="refresh" label="Reload users" @click="reloadDepartmentUsers" /></div>
+                      </div>
+                      <div v-else class="registry-assign-panel">
+                        <div class="registry-assign-controls">
+                          <q-select v-model="sectionRoles[group.key]" outlined dense clearable emit-value map-options
+                            label="Stakeholder type *" :options="library.stakeholderTypes"
+                            option-label="name" option-value="id" class="registry-assign-type" />
+                          <q-btn unelevated no-caps color="indigo-9" icon="group_add"
+                            :disable="sectionSelections[group.key].length === 0 || sectionRoles[group.key] == null || saving"
+                            :label="`Assign ${sectionSelections[group.key].length}`"
+                            @click="assignSectionStakeholders(group.key)" />
+                        </div>
+                        <div class="registry-department-group__header">
+                          <span>{{ group.users.length }} available users</span>
+                          <q-checkbox :model-value="allSectionUsersSelected(group.key, group.users)"
+                            color="indigo-9" label="Select all" @update:model-value="checked => selectSectionUsers(group.key, group.users, checked)" />
+                        </div>
+                        <div class="registry-stakeholder-list">
+                          <div v-for="user in group.users" :key="user.id" class="registry-stakeholder-item">
+                            <q-checkbox :model-value="sectionSelections[group.key].includes(user.id)" color="indigo-9"
+                              @update:model-value="checked => selectSectionUser(group.key, user.id, checked)" />
+                            <q-avatar color="indigo-1" text-color="indigo-9" size="35px">{{ userInitials(user.name) }}</q-avatar>
+                            <div class="registry-stakeholder-person"><strong>{{ user.name }}</strong><span>{{ user.email || 'No email provided' }}</span></div>
+                            <q-chip v-if="isStakeholderSelected(user.id)" dense outline color="indigo-8" icon="check_circle">
+                              {{ library.labelFor('stakeholderTypes', stakeholderTypeFor(user.id)) }}
+                            </q-chip>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
 
-            <q-banner v-if="auth.user && projectManagerRole" rounded class="bg-indigo-1 text-indigo-10 q-mb-md">
-              <div class="row items-center q-gutter-sm">
-                <q-icon name="verified_user" size="22px" />
-                <div><strong>Automatic Project Manager</strong>
-                  <div class="text-caption">{{ loggedInUserName }} (your signed-in account) is assigned as Project Manager when you register this system.</div>
-                </div>
-              </div>
-            </q-banner>
-            <div class="registry-group-title row items-center justify-between">
-              <span>Assign stakeholders</span>
-            </div>
-            <div class="registry-stakeholder-toolbar q-mb-md">
-              <q-input v-model="stakeholderSearch" outlined dense clearable placeholder="Search name or email..." class="registry-stakeholder-search">
-                <template #prepend><q-icon name="search" /></template>
-              </q-input>
-            </div>
-            <section v-for="group in stakeholderSections" :key="group.key" class="registry-stakeholder-section q-mb-md">
-              <div class="registry-stakeholder-section__title">
-                <div>
-                  <strong>{{ group.title }}</strong>
-                  <div class="text-caption text-grey-7">{{ group.departmentId != null ? departmentLabel(group.departmentId) : 'No department selected' }}</div>
-                </div>
-                <q-chip dense color="indigo-1" text-color="indigo-9">{{ group.users.length }} user(s)</q-chip>
-              </div>
-              <div v-if="group.departmentId == null" class="registry-stakeholder-empty">
-                Select {{ group.title === 'Business Owner' ? 'a Business Owner' : 'a Managing Office' }} in the previous steps.
-              </div>
-              <div v-else-if="departmentUsersLoading && !departmentLoadedIds.includes(group.departmentId)" class="registry-stakeholder-empty row items-center justify-center q-gutter-sm">
-                <q-spinner color="indigo-9" size="20px" /> Loading department users...
-              </div>
-              <div v-else-if="departmentErrors[group.departmentId]" class="registry-stakeholder-empty">
-                <div class="text-negative q-mb-sm">{{ departmentErrors[group.departmentId] }}</div>
-                <q-btn outline no-caps color="indigo-9" label="Retry loading users" @click="reloadDepartmentUsers" />
-              </div>
-              <div v-else-if="group.users.length === 0" class="registry-stakeholder-empty">
-                {{ stakeholderSearch ? 'No users match your search in this department.' : 'The API returned 0 usable users for this department.' }}
-                <div v-if="!stakeholderSearch" class="q-mt-sm text-caption">Confirm that the request uses this department ID and the response contains each user’s ID.</div>
-                <q-btn v-if="!stakeholderSearch" flat no-caps color="indigo-9" icon="refresh" label="Reload department users" class="q-mt-sm" @click="reloadDepartmentUsers" />
-              </div>
-              <div v-else class="registry-assign-panel">
-                <div class="registry-assign-panel__head">
-                  <div><strong>Assign {{ group.title }} stakeholders</strong><p>Select a Stakeholder Type and check users from this department.</p></div>
-                  <q-chip dense color="indigo-1" text-color="indigo-9">{{ sectionSelections[group.key].length }} selected</q-chip>
-                </div>
-                <div class="registry-assign-controls">
-                  <q-select v-model="sectionRoles[group.key]" outlined dense clearable emit-value map-options
-                    label="Stakeholder type for selected users *" :options="library.stakeholderTypes"
-                    option-label="name" option-value="id" class="registry-assign-type" />
-                  <q-btn unelevated no-caps color="indigo-9" icon="group_add"
-                    :disable="sectionSelections[group.key].length === 0 || sectionRoles[group.key] == null || saving"
-                    :label="`Assign ${sectionSelections[group.key].length} user${sectionSelections[group.key].length === 1 ? '' : 's'}`"
-                    @click="assignSectionStakeholders(group.key)" />
-                </div>
-                <div class="registry-department-group__header">
-                  <span>{{ group.users.length }} matching user(s)</span>
-                  <q-checkbox :model-value="allSectionUsersSelected(group.key, group.users)"
-                    color="indigo-9" label="Select all" @update:model-value="checked => selectSectionUsers(group.key, group.users, checked)" />
-                </div>
-                <div class="registry-stakeholder-list">
-                  <div v-for="user in group.users" :key="user.id" class="registry-stakeholder-item">
-                    <q-checkbox :model-value="sectionSelections[group.key].includes(user.id)" color="indigo-9"
-                      @update:model-value="checked => selectSectionUser(group.key, user.id, checked)" />
-                    <q-avatar color="indigo-1" text-color="indigo-9" size="35px">{{ userInitials(user.name) }}</q-avatar>
-                    <div class="registry-stakeholder-person"><strong>{{ user.name }}</strong><span>{{ user.email || 'No email provided' }}</span></div>
-                    <q-chip v-if="isStakeholderSelected(user.id)" dense outline color="indigo-8" icon="check_circle">
-                      {{ library.labelFor('stakeholderTypes', stakeholderTypeFor(user.id)) }}
-                    </q-chip>
-                  </div>
-                </div>
-              </div>
-            </section>
-            <div v-if="!isInternallyManaged" class="text-caption text-grey-7 q-mb-md">
-              Managing Office stakeholder assignment is available when Managing Type is Internally Managed.
-            </div>
-            <div v-if="stakeholderGroups.length" class="registry-assigned-groups">
-              <div class="registry-group-title">Assigned stakeholder groups</div>
-              <section v-for="group in stakeholderGroups" :key="group.id" class="registry-assigned-group">
-                <div class="registry-assigned-group__header">
-                  <strong>{{ group.name }}</strong>
-                  <q-chip dense color="indigo-1" text-color="indigo-9">{{ group.users.length }} user(s)</q-chip>
-                </div>
-                <div v-for="user in group.users" :key="user.user_id" class="registry-assigned-user">
-                  <q-icon name="person" color="indigo-8" size="19px" />
-                  <span>{{ userDisplayName(user.user_id) }}</span>
-                  <q-btn round dense flat icon="close" color="negative" aria-label="Remove assignment"
-                    @click="removeStakeholder(user.user_id)" />
+
                 </div>
               </section>
-            </div>
-            <div v-if="library.stakeholderTypes.length === 0" class="text-caption text-orange-9">
-              Stakeholder types are not loaded. Check the Stakeholder Type Library before assigning users.
-            </div>
-            <div class="text-caption text-grey-7">
-              Users are loaded from the Department Library. Select users, choose a Stakeholder Type, then Assign. Save the Registry to persist assignments.
-            </div>
-
+              <section class="registry-stakeholder-workflow" aria-labelledby="registry-assigned-stakeholder-title">
+                <div class="registry-stakeholders-column__heading">
+                  <span class="registry-stakeholders-column__icon"><q-icon name="groups" size="21px" /></span>
+                  <div><h3 id="registry-assigned-stakeholder-title">Assigned Groups</h3><p>Stakeholders grouped by department and role.</p></div>
+                </div>
+                <div class="registry-stakeholders-grid">
+                  <section v-for="section in assignedStakeholderSections" :key="section.key" class="registry-assigned-department">
+                    <div class="registry-stakeholder-section__title">
+                      <div>
+                        <strong>{{ section.title }}</strong>
+                        <div class="text-caption text-grey-7">{{ section.departmentId != null ? departmentLabel(section.departmentId) : 'No department selected' }}</div>
+                      </div>
+                      <q-chip dense color="indigo-1" text-color="indigo-9">{{ section.users.length }} assigned</q-chip>
+                    </div>
+                    <div v-if="section.groups.length" class="registry-assigned-groups">
+                      <section v-for="group in section.groups" :key="group.id" class="registry-assigned-group">
+                        <div class="registry-assigned-group__header"><strong>{{ group.name }}</strong><q-chip dense color="indigo-1" text-color="indigo-9">{{ group.users.length }} user(s)</q-chip></div>
+                        <div v-for="user in group.users" :key="user.user_id" class="registry-assigned-user">
+                          <q-icon name="person" color="indigo-8" size="19px" />
+                          <span>{{ userDisplayName(user.user_id) }}</span>
+                          <q-btn round dense flat icon="close" color="negative" aria-label="Remove assignment" @click="removeStakeholder(user.user_id)" />
+                        </div>
+                      </section>
+                    </div>
+                    <div v-else class="registry-stakeholder-empty">No stakeholders assigned to this department.</div>
+                  </section>
+                </div>
+                <section v-if="unclassifiedStakeholderGroups.length" class="registry-assigned-unclassified">
+                  <div class="registry-stakeholder-section__title"><div><strong>Other Assigned Users</strong><div class="text-caption text-grey-7">Department membership could not be verified from the loaded directory.</div></div></div>
+                  <div class="registry-assigned-groups">
+                    <section v-for="group in unclassifiedStakeholderGroups" :key="group.id" class="registry-assigned-group">
+                      <div class="registry-assigned-group__header"><strong>{{ group.name }}</strong></div>
+                      <div v-for="user in group.users" :key="user.user_id" class="registry-assigned-user">
+                        <q-icon name="person" color="indigo-8" size="19px" />
+                        <span>{{ userDisplayName(user.user_id) }}</span>
+                        <q-btn round dense flat icon="close" color="negative" aria-label="Remove assignment" @click="removeStakeholder(user.user_id)" />
+                      </div>
+                    </section>
+                  </div>
+                </section>
+              </section>
+              <div v-if="library.stakeholderTypes.length === 0" class="text-caption text-orange-9">Stakeholder types are unavailable. Reload the Stakeholder Type Library.</div>
             </div>
             <div v-show="formStep === 5" class="registry-wizard-content">
 
@@ -672,7 +726,7 @@ function triggerDocumentFile(index: number): void {
 function createDocumentDraftName(index: number): void {
   const doc = form.value.docs[index]
   const key = String(index)
-  if (!doc || !documentAssignees.value[key] || (doc.file_path?.trim() && !isPendingDocumentPath(doc.file_path)) || documentFiles.value[key]) return
+  if (!doc || (managementMode.value !== 'joint' && !documentAssignees.value[key]) || (doc.file_path?.trim() && !isPendingDocumentPath(doc.file_path)) || documentFiles.value[key]) return
   const name = library.labelFor('documentTypes', Number(doc.docs_type)) || `Document ${index + 1}`
   documentDraftNames.value[key] = `${name} — Draft`
   documentDraftContents.value[key] = `# ${name}\n\n## Overview\n\n## Objectives\n\n## Requirements\n\n## Notes\n`
@@ -895,11 +949,33 @@ const departmentDirectory = ref<Record<number, DepartmentUser[]>>({})
 const departmentErrors = ref<Record<number, string>>({})
 const departmentLoadedIds = ref<number[]>([])
 let departmentRequestVersion = 0
-const isInternallyManaged = computed(() => {
-  const type = library.managingTypes.find(item => Number(item.id) === Number(form.value.desc.managing_type))
-  if (!type || form.value.desc.managing_type == null) return false
-  return /\binternal(?:ly)?\b/i.test(`${type.name} ${type.alias ?? ''}`)
-})
+// Resolve management mode by Library name/alias rather than assuming fixed IDs.
+type ManagementMode = 'internal' | 'third-party' | 'joint' | 'other' | 'unselected'
+function managementModeFor(typeId: number | null | undefined): ManagementMode {
+  if (typeId == null) return 'unselected'
+  const entry = library.managingTypes.find(item => Number(item.id) === Number(typeId))
+  if (!entry) return 'other'
+  const label = `${entry.name} ${entry.alias ?? ''}`.toLowerCase()
+  if (/\b(joint(?:ly)?|hybrid|mixed|co[\s_-]*managed|both)\b/.test(label)) return 'joint'
+  if (/third[\s_-]*party|externally?|outsourc|vendor/.test(label)) return 'third-party'
+  if (/internally?|in[\s_-]*house/.test(label)) return 'internal'
+  return 'other'
+}
+const managementMode = computed<ManagementMode>(() => managementModeFor(form.value.desc.managing_type))
+const showManagingOffice = computed(() => managementMode.value === 'internal' || managementMode.value === 'joint' || managementMode.value === 'other')
+const showThirdPartyCompany = computed(() => managementMode.value === 'third-party' || managementMode.value === 'joint' || managementMode.value === 'other')
+const isInternallyManaged = computed(() => showManagingOffice.value)
+function onManagingTypeChanged(value: number | null): void {
+  // Clear fields hidden by the newly selected mode; do not send stale associations.
+  const mode = managementModeFor(value)
+  if (mode === 'internal') form.value.desc.third_party_company = null
+  if (mode === 'third-party') form.value.desc.managing_office = null
+  if (mode === 'unselected') {
+    form.value.desc.managing_office = null
+    form.value.desc.third_party_company = null
+  }
+}
+// Load Business Owner users and, only for internal/joint management, Managing Office users.
 const stakeholderSourceDepartments = computed(() => {
   const ids: number[] = []
   const owner = Number(form.value.business_owner)
@@ -918,7 +994,6 @@ const loggedInUserName = computed(() => {
   return [details?.first_name, details?.middle_name, details?.last_name, details?.ext_name]
     .filter(Boolean).join(' ') || user.username || user.email || `User #${user.id}`
 })
-const stakeholderSearch = ref('')
 const sectionSelections = ref<Record<StakeholderSectionKey, number[]>>({ owner: [], office: [] })
 const sectionRoles = ref<Record<StakeholderSectionKey, number | null>>({ owner: null, office: null })
 const departmentUsers = computed<StakeholderUser[]>(() => {
@@ -938,15 +1013,15 @@ const departmentUsers = computed<StakeholderUser[]>(() => {
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
 })
 const stakeholderSections = computed(() => {
-  const term = stakeholderSearch.value?.trim().toLowerCase() ?? ''
   const sections: { key: StakeholderSectionKey; title: string; departmentId: number | null; users: StakeholderUser[] }[] = [
     { key: 'owner', title: 'Business Owner', departmentId: form.value.business_owner ?? null, users: [] },
   ]
-  if (isInternallyManaged.value) sections.push({ key: 'office', title: 'Managing Office', departmentId: form.value.desc.managing_office ?? null, users: [] })
+  if (isInternallyManaged.value) {
+    sections.push({ key: 'office', title: 'Managing Office', departmentId: form.value.desc.managing_office ?? null, users: [] })
+  }
   return sections.map(section => ({
     ...section,
-    users: departmentUsers.value.filter(user => section.departmentId != null && user.departmentIds.includes(section.departmentId) &&
-      (!term || `${user.name} ${user.email ?? ''}`.toLowerCase().includes(term))),
+    users: departmentUsers.value.filter(user => section.departmentId != null && user.departmentIds.includes(section.departmentId)),
   }))
 })
 async function loadDepartmentUsers(): Promise<void> {
@@ -996,12 +1071,30 @@ function selectSectionUsers(key: StakeholderSectionKey, users: StakeholderUser[]
     ? [...new Set([...sectionSelections.value[key], ...ids])]
     : sectionSelections.value[key].filter(id => !ids.has(id))
 }
-const stakeholderGroups = computed(() => library.stakeholderTypes
-  .map(role => ({
+// The API stores a user ID and role, not an assignment-source department.
+// Infer department membership from the loaded directory, without mislabeling unknown users.
+const assignedStakeholderSections = computed(() => stakeholderSections.value.map(section => {
+  const departmentId = section.departmentId
+  const matching = form.value.stakeholders.filter(person =>
+    departmentId != null && departmentUsers.value.some(user =>
+      Number(user.id) === Number(person.user_id) && user.departmentIds.includes(departmentId),
+    ),
+  )
+  const groups = library.stakeholderTypes.map(role => ({
+    id: Number(role.id),
+    name: role.name,
+    users: matching.filter(person => Number(person.stakeholder_type) === Number(role.id)),
+  })).filter(group => group.users.length > 0)
+  return { ...section, users: matching, groups }
+}))
+const unclassifiedStakeholderGroups = computed(() => {
+  const knownIds = new Set(assignedStakeholderSections.value.flatMap(section => section.users.map(user => Number(user.user_id))))
+  const unknown = form.value.stakeholders.filter(person => !knownIds.has(Number(person.user_id)))
+  return library.stakeholderTypes.map(role => ({
     id: Number(role.id), name: role.name,
-    users: form.value.stakeholders.filter(item => Number(item.stakeholder_type) === Number(role.id)),
-  }))
-  .filter(group => group.users.length > 0))
+    users: unknown.filter(person => Number(person.stakeholder_type) === Number(role.id)),
+  })).filter(group => group.users.length > 0)
+})
 function assignSectionStakeholders(key: StakeholderSectionKey): void {
   const role = sectionRoles.value[key]
   if (role == null || !library.stakeholderTypes.some(item => Number(item.id) === Number(role))) {
@@ -1187,7 +1280,6 @@ function openCreate(): void {
   editingId.value = null
   form.value = emptyForm()
   resetDocumentWorkspace()
-  stakeholderSearch.value = ''
   sectionSelections.value = { owner: [], office: [] }
   sectionRoles.value = { owner: null, office: null }
   formStep.value = 1
@@ -1235,8 +1327,7 @@ async function openEdit(id: number): Promise<void> {
         documentDraftNames.value[String(index)] = `${library.labelFor('documentTypes', Number(doc.docs_type))} — Draft (content not stored)`
       }
     })
-    stakeholderSearch.value = ''
-    sectionSelections.value = { owner: [], office: [] }
+      sectionSelections.value = { owner: [], office: [] }
     sectionRoles.value = { owner: null, office: null }
     formStep.value = 1
     profileOpen.value = false
@@ -1925,4 +2016,204 @@ onMounted(() => {
 @media(max-width:1000px){.registry-dialog--editor .registry-wizard-layout{grid-template-columns:215px minmax(0,1fr)}.registry-dialog--editor .registry-wizard-sidebar{padding:20px 10px!important}.registry-dialog--editor .registry-wizard-main{padding:20px!important}.registry-wizard-header__art{display:none}}
 @media(max-width:900px){.registry-dialog--editor .registry-wizard-layout{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.registry-dialog--editor .registry-wizard-sidebar{padding:10px 12px!important}.registry-dialog--editor .registry-wizard-steps{flex-direction:row!important;overflow-x:auto}.registry-dialog--editor .registry-wizard-step{width:auto!important;white-space:nowrap;flex:none;padding:10px!important;min-height:44px!important}.registry-profile-summary__details{grid-template-columns:1fr;gap:16px}.registry-profile-summary__detail+ .registry-profile-summary__detail{border-left:0;border-top:1px solid #e3eaf7;padding:16px 0 0}}
 @media(max-width:600px){.registry-dialog--editor .registry-wizard-header{min-height:86px;padding:14px 16px!important}.registry-dialog--editor .registry-wizard-header__icon{width:42px;height:42px;border-radius:12px!important}.registry-dialog--editor .registry-wizard-header__copy .text-h6{font-size:19px!important}.registry-dialog--editor .registry-wizard-main{padding:13px!important}.registry-dialog--editor .registry-overview-block{padding:15px!important}.registry-dialog--editor .registry-overview-block--profile{padding:0!important}.registry-profile-summary{padding:16px;gap:10px}.registry-profile-summary__copy{padding-left:10px}.registry-profile-summary__copy h3{font-size:19px}.registry-profile-summary__icon{width:43px;height:43px}.registry-profile-summary__status{margin-left:0}.registry-profile-summary__details{padding:16px}.registry-dialog--editor .registry-wizard-footer{padding:9px!important}}
+</style>
+
+<style scoped>
+/* Management-only layout: one shared two-column grid for every editable field. */
+.registry-management {
+  gap: 22px !important;
+}
+.registry-management__card {
+  background: #fff;
+  border: 1px solid #dae4f8;
+  border-radius: 17px;
+  overflow: hidden;
+  box-shadow: 0 6px 22px rgba(20, 55, 116, .035);
+}
+.registry-management__heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 23px;
+  background: linear-gradient(110deg, #f0f5ff, #f9fbff);
+  border-bottom: 1px solid #e3eafa;
+}
+.registry-management__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 47px;
+  height: 47px;
+  border-radius: 13px;
+  background: #e0eaff;
+  color: #0038a8;
+}
+.registry-management__heading h3 {
+  margin: 0 0 3px;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.3;
+  color: #102e6c;
+}
+.registry-management__heading p {
+  margin: 0;
+  font-size: 12px;
+  color: #7184a5;
+  line-height: 1.45;
+}
+/* The type field occupies the first cell. The conditional row takes both
+   columns, so each conditional field matches the width of the type field. */
+.registry-dialog--editor .registry-management__body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+  row-gap: 16px;
+  align-items: start;
+  padding: 24px;
+}
+.registry-dialog--editor .registry-management__type {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+.registry-dialog--editor .registry-management__conditional {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+.registry-dialog--editor .registry-management__conditional > .q-field,
+.registry-dialog--editor .registry-management__timeline > .q-field,
+.registry-dialog--editor .registry-management__type {
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+}
+/* No shrinking the Managing Office field when it is the only visible option. */
+.registry-dialog--editor .registry-management__timeline {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.registry-dialog--editor .registry-management__timeline > .registry-management__duration {
+  grid-column: 1 / -1;
+}
+/* Same input height, same outline radius, same text alignment on all 6 controls. */
+.registry-dialog--editor .registry-management :deep(.q-field--outlined .q-field__control) {
+  min-height: 56px;
+  height: 56px;
+  border-radius: 9px;
+  background: #fff;
+}
+.registry-dialog--editor .registry-management :deep(.q-field__marginal) {
+  height: 56px;
+}
+.registry-dialog--editor .registry-management :deep(.q-field__native),
+.registry-dialog--editor .registry-management :deep(.q-field__input) {
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .registry-management__heading { padding: 16px; }
+  .registry-dialog--editor .registry-management__body {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+  }
+  .registry-dialog--editor .registry-management__conditional,
+  .registry-dialog--editor .registry-management__timeline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>
+
+<style scoped>
+/* Stakeholders: Managing Office selection beside assigned groups. */
+.registry-stakeholders-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 20px;
+  width: 100%;
+}
+.registry-stakeholders-column {
+  min-width: 0;
+  border: 1px solid #dce5f5;
+  border-radius: 15px;
+  background: #fff;
+  padding: 18px;
+  box-shadow: 0 4px 15px rgba(19, 51, 113, .035);
+}
+.registry-stakeholders-column__heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.registry-stakeholders-column__icon {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: #eaf1ff;
+  color: #0038a8;
+  border-radius: 11px;
+}
+.registry-stakeholders-column__heading h3 {
+  color: #102e6c;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.35;
+  margin: 0;
+}
+.registry-stakeholders-column__heading p {
+  color: #7585a1;
+  font-size: 11px;
+  margin: 3px 0 0;
+}
+.registry-stakeholders-column .registry-stakeholder-section {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.registry-stakeholders-column .registry-stakeholder-section__title {margin-bottom: 13px;}
+.registry-stakeholders-column .registry-assign-controls {flex-wrap: wrap;}
+.registry-stakeholders-column .registry-assign-type {flex: 1 1 200px;}
+.registry-stakeholders-column .registry-assigned-groups {gap: 12px;}
+.registry-stakeholders-column .registry-stakeholder-item {padding: 10px;gap: 8px;}
+.registry-stakeholders-column .registry-stakeholder-person {flex-basis: 120px;}
+.registry-stakeholders-column .registry-stakeholder-list {max-height: 400px;}
+@media (max-width: 1080px) {
+  .registry-stakeholders-grid {grid-template-columns: 1fr;}
+}
+@media (max-width: 600px) {
+  .registry-stakeholders-column {padding: 13px;}
+  .registry-stakeholders-column .registry-assign-controls > .q-btn {width: 100%;}
+}
+</style>
+
+<style scoped>
+/* Business Owner and Managing Office panels share the assignment column. */
+.registry-stakeholders-column > .registry-stakeholder-section + .registry-stakeholder-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #e3eaf7;
+}
+</style>
+
+<style scoped>
+/* Two stacked workflow sections; each contains Owner | Managing Office columns. */
+.registry-stakeholders-layout { gap: 22px !important; }
+.registry-stakeholder-workflow { min-width: 0; }
+.registry-stakeholder-workflow > .registry-stakeholders-column__heading { margin: 0 0 14px; }
+.registry-stakeholders-layout .registry-stakeholders-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; }
+.registry-stakeholders-layout .registry-stakeholder-section,
+.registry-stakeholders-layout .registry-assigned-department { min-width: 0; border: 1px solid #dce5f5; border-radius: 14px; background: #fff; padding: 16px; box-shadow: 0 4px 15px rgba(19,51,113,.035); }
+.registry-stakeholders-layout .registry-stakeholder-section__title { margin-bottom: 14px; }
+.registry-stakeholders-layout .registry-stakeholder-list { max-height: 285px; }
+.registry-stakeholders-layout .registry-assign-controls { flex-wrap: wrap; padding: 12px; }
+.registry-stakeholders-layout .registry-assign-type { flex: 1 1 185px; }
+.registry-assigned-unclassified { margin-top: 16px; padding: 16px; border: 1px dashed #cfd9ee; border-radius: 14px; background: #f8faff; }
+@media (max-width: 980px) { .registry-stakeholders-layout .registry-stakeholders-grid { grid-template-columns: 1fr; } }
 </style>
