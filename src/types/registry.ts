@@ -8,6 +8,13 @@ export interface RegistryDescriptionPayload {
 }
 
 export interface RegistryRepositoryPayload {
+  // FULLSTACK fields are sent inside the existing repo object.
+  frontend_repo_git?: string | null
+  frontend_staging_url?: string | null
+  frontend_production_url?: string | null
+  backend_repo_git?: string | null
+  backend_staging_url?: string | null
+  backend_production_url?: string | null
   staging_url?: string | null
   production_url?: string | null
   repo_git?: string | null
@@ -45,7 +52,16 @@ export interface RegistryPayload {
   docs?: RegistryDocumentPayload[]
 }
 
+export interface RegistryScopedRepositoryRecord {
+  repo_scope: 'frontend' | 'backend' | 'single'
+  repo_git?: string | null
+  staging_url?: string | null
+  production_url?: string | null
+  development_solution_type?: number | null
+}
+
 export interface RegistryRecord extends RegistryPayload {
+  repos?: RegistryScopedRepositoryRecord[]
   id: number
   created_at?: string
   updated_at?: string

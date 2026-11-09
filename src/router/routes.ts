@@ -8,6 +8,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/dashboard' },
       { path: 'dashboard', component: () => import('@/pages/DashboardPage.vue') },
+      { path: 'scrum-planning', component: () => import('@/pages/ScrumPlanningPage.vue'), meta: { title: 'Scrum Planning' } },
       { path: 'system-registry', component: () => import('@/pages/SystemRegistryPage.vue'), meta: { title: 'System Registry' } },
       { path: 'account', component: () => import('@/pages/AccountPage.vue') },
       { path: 'change-password', component: () => import('@/pages/ChangePasswordPage.vue') }

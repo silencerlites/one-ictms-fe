@@ -8,7 +8,7 @@
           <q-tooltip>A stored file path or locally selected file exists</q-tooltip>
         </q-icon>
       </div>
-      <div class="registry-document-row__actions">
+      <div v-if="managementMode !== 'unselected'" class="registry-document-row__actions">
         <!-- External management: the company provides the file; no internal assignee required. -->
         <template v-if="managementMode === 'third-party'">
           <q-btn no-caps outline color="indigo-8" icon="upload_file"

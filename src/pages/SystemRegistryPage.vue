@@ -118,30 +118,65 @@
     <q-dialog v-model="profileOpen" persistent transition-show="scale" transition-hide="scale">
       <q-card class="registry-profile-init-dialog">
         <q-card-section class="registry-profile-init-header">
-          <div class="registry-profile-init-icon"><q-icon name="dns" size="24px" /></div>
-          <div class="col">
-            <div class="text-h6 text-weight-bold">System Profile</div>
-            <div class="text-caption text-grey-7">Enter the new information system's basic details to initiate its record.</div>
+          <div class="registry-profile-init-icon"><q-icon name="dns" size="25px" /></div>
+          <div class="registry-profile-init-heading">
+            <div class="registry-profile-init-eyebrow">ONE ICTMS / SYSTEM REGISTRY</div>
+            <h2>Register an Information System</h2>
+            <p>Set up the system profile and choose its development architecture.</p>
           </div>
-          <q-btn flat round icon="close" aria-label="Close System Profile" :disable="saving" @click="profileOpen = false" />
+          <q-btn flat round icon="close" class="registry-profile-init-close" aria-label="Close System Profile" :disable="saving" @click="profileOpen = false" />
         </q-card-section>
         <q-form @submit.prevent="void initiateSystem()">
           <q-card-section class="registry-profile-init-fields">
             <q-banner v-if="library.errors.registryStatuses || library.registryStatuses.length === 0" rounded class="bg-orange-1 text-orange-10">
               Registry Status options are unavailable. <q-btn flat no-caps color="indigo-9" label="Reload Libraries" @click="void loadLibraries()" />
             </q-banner>
-            <q-input v-model.trim="form.system_name" outlined hide-bottom-space label="System name *" :rules="[requiredText]" />
-            <div class="registry-profile-init-grid">
-              <q-input v-model.trim="form.alias" outlined label="Alias" />
-              <q-select v-model="form.status" outlined hide-bottom-space label="Registry status *" :options="library.registryStatuses" option-label="name" option-value="id" emit-value map-options :rules="[requiredId]" :display-value="selectedStatusName" :disable="library.registryStatuses.length === 0" />
-            </div>
-            <q-input v-model.trim="form.description" type="textarea" autogrow outlined label="Description" />
-            <q-select v-model="form.business_owner" outlined clearable label="Business owner (Department)" :options="departmentOptions" option-label="name" option-value="id" emit-value map-options />
+
+            <section class="registry-profile-init-panel" aria-labelledby="registry-profile-info-heading">
+              <div class="registry-profile-init-section-heading">
+                <div>
+                  <h3 id="registry-profile-info-heading">System information</h3>
+                  <p>Provide the identifying details of your information system.</p>
+                </div>
+                <span class="registry-profile-init-required-hint">* Required</span>
+              </div>
+              <div class="registry-profile-init-inputs">
+                <q-input v-model.trim="form.system_name" outlined hide-bottom-space label="System name *" :rules="[requiredText]" class="registry-profile-init-name" />
+                <div class="registry-profile-init-grid">
+                  <q-input v-model.trim="form.alias" outlined label="Alias" />
+                  <q-select v-model="form.status" outlined hide-bottom-space label="Registry status *" :options="library.registryStatuses" option-label="name" option-value="id" emit-value map-options :rules="[requiredId]" :display-value="selectedStatusName" :disable="library.registryStatuses.length === 0" />
+                </div>
+                <q-input v-model.trim="form.description" type="textarea" autogrow outlined label="Description" class="registry-profile-init-description" />
+                <q-select v-model="form.business_owner" outlined clearable label="Business owner (Department)" :options="departmentOptions" option-label="name" option-value="id" emit-value map-options />
+              </div>
+            </section>
+
+            <section class="registry-profile-init-panel registry-profile-init-panel--architecture" aria-labelledby="registry-profile-type-heading">
+              <div class="registry-profile-init-section-heading">
+                <div>
+                  <h3 id="registry-profile-type-heading">Development Solution Type</h3>
+                  <p>Choose how this system is developed and deployed.</p>
+                </div>
+              </div>
+              <div class="registry-profile-init-solution-grid" role="group" aria-label="Development Solution Type">
+                <button v-for="option in library.developmentSolutionTypes" :key="option.id" type="button"
+                  class="registry-profile-init-solution" :class="{ 'is-selected': Number(form.repo.development_solution_type) === Number(option.id) }"
+                  :aria-pressed="Number(form.repo.development_solution_type) === Number(option.id)"
+                  @click="selectDevelopmentSolution(Number(option.id))">
+                  <span class="registry-profile-init-solution-icon"><q-icon :name="solutionTypeIcon(option.name)" size="23px" /></span>
+                  <span class="registry-profile-init-solution-name">{{ option.name }}</span>
+                </button>
+              </div>
+              <div v-if="!library.developmentSolutionTypes.length" class="text-caption text-grey-7">Development Solution Type options are not available. Check the Library API.</div>
+            </section>
           </q-card-section>
           <q-separator />
-          <q-card-actions align="right" class="registry-profile-init-footer">
-            <q-btn flat no-caps label="Cancel" :disable="saving" @click="profileOpen = false" />
-            <q-btn type="submit" unelevated no-caps color="indigo-9" icon-right="rocket_launch" label="Initiate" :loading="saving" />
+          <q-card-actions class="registry-profile-init-footer">
+            <div class="registry-profile-init-footer-note"><q-icon name="info_outline" size="17px" /> You can complete the remaining details after initiation.</div>
+            <div class="registry-profile-init-footer-actions">
+              <q-btn flat no-caps label="Cancel" :disable="saving" @click="profileOpen = false" />
+              <q-btn type="submit" unelevated no-caps color="primary" icon-right="arrow_forward" label="Initiate System" :loading="saving" class="registry-profile-init-submit" />
+            </div>
           </q-card-actions>
         </q-form>
       </q-card>
@@ -311,7 +346,7 @@
               </section>
             </div>
             <div v-show="formStep === 3" class="registry-wizard-content registry-documents">
-              <p class="text-caption text-grey-7 q-ma-none">{{ managementMode === 'third-party' ? 'Upload the document provided by the external company.' : managementMode === 'joint' ? 'Assign a responsible user, upload a document, or prepare a draft.' : 'Assign a responsible user before uploading or preparing a document draft.' }}</p>
+              <p class="text-caption text-grey-7 q-ma-none">{{ managementMode === 'unselected' ? 'Select a Managing Type in the Management tab to enable document actions.' : managementMode === 'third-party' ? 'Upload the document provided by the external company.' : managementMode === 'joint' ? 'Assign a responsible user, upload a document, or prepare a draft.' : 'Assign a responsible user before uploading or preparing a document draft.' }}</p>
               <RegistryDocumentRow
                 v-for="(doc, index) in form.docs.slice(0, 4)"
                 :key="doc.docs_type"
@@ -488,26 +523,103 @@
               </section>
               <div v-if="library.stakeholderTypes.length === 0" class="text-caption text-orange-9">Stakeholder types are unavailable. Reload the Stakeholder Type Library.</div>
             </div>
-            <div v-show="formStep === 5" class="registry-wizard-content">
+            <div v-show="formStep === 5" class="registry-wizard-content registry-technology">
+              <div class="registry-technology__intro">
+                <span class="registry-technology__intro-icon"><q-icon name="developer_board" size="24px" /></span>
+                <div>
+                  <h3>Technology Configuration</h3>
+                  <p>Define the technologies and infrastructure used to build and run this information system.</p>
+                </div>
+              </div>
 
-            <div class="registry-group-title">Technology stack</div>
-            <div class="registry-form__grid">
-              <q-select v-model="form.tech_stack.frontend_stack" multiple use-chips outlined clearable label="Frontend technologies" :options="library.techStacks" :option-label="techLabel" option-value="id" emit-value map-options />
-              <q-select v-model="form.tech_stack.backend_stack" multiple use-chips outlined clearable label="Backend technologies" :options="library.techStacks" :option-label="techLabel" option-value="id" emit-value map-options />
-              <q-input v-model.trim="form.tech_stack.database" outlined label="Database" />
-              <q-input v-model.trim="form.tech_stack.server_type" outlined label="Server type" />
-              <q-input v-model.trim="form.tech_stack.server_name" outlined label="Server name" />
-            </div>
+              <div class="registry-technology__stack-grid">
+                <section class="registry-technology__card" aria-labelledby="registry-technology-frontend-title">
+                  <div class="registry-technology__card-header">
+                    <span class="registry-technology__card-icon registry-technology__card-icon--frontend"><q-icon name="desktop_windows" size="22px" /></span>
+                    <div>
+                      <h4 id="registry-technology-frontend-title">Frontend Stack</h4>
+                      <p>Client-side frameworks and UI technologies</p>
+                    </div>
+                  </div>
+                  <q-select
+                    v-model="form.tech_stack.frontend_stack"
+                    multiple use-chips outlined clearable
+                    label="Frontend technologies"
+                    :options="library.techStacks"
+                    :option-label="techLabel"
+                    option-value="id" emit-value map-options
+                    dropdown-icon="expand_more"
+                    class="registry-technology__field"
+                  />
+                  <div class="registry-technology__helper"><q-icon name="info_outline" size="15px" /> Select one or more technologies</div>
+                </section>
 
+                <section class="registry-technology__card" aria-labelledby="registry-technology-backend-title">
+                  <div class="registry-technology__card-header">
+                    <span class="registry-technology__card-icon registry-technology__card-icon--backend"><q-icon name="dns" size="22px" /></span>
+                    <div>
+                      <h4 id="registry-technology-backend-title">Backend Stack</h4>
+                      <p>Server-side languages, frameworks and APIs</p>
+                    </div>
+                  </div>
+                  <q-select
+                    v-model="form.tech_stack.backend_stack"
+                    multiple use-chips outlined clearable
+                    label="Backend technologies"
+                    :options="library.techStacks"
+                    :option-label="techLabel"
+                    option-value="id" emit-value map-options
+                    dropdown-icon="expand_more"
+                    class="registry-technology__field"
+                  />
+                  <div class="registry-technology__helper"><q-icon name="info_outline" size="15px" /> Select one or more technologies</div>
+                </section>
+              </div>
+
+              <section class="registry-technology__card registry-technology__infrastructure" aria-labelledby="registry-technology-infra-title">
+                <div class="registry-technology__card-header">
+                  <span class="registry-technology__card-icon registry-technology__card-icon--infra"><q-icon name="storage" size="22px" /></span>
+                  <div>
+                    <h4 id="registry-technology-infra-title">Database &amp; Infrastructure</h4>
+                    <p>Configure where your system data and services are hosted.</p>
+                  </div>
+                </div>
+                <div class="registry-technology__infra-grid">
+                  <q-input v-model.trim="form.tech_stack.database" outlined label="Database" placeholder="e.g. MySQL, PostgreSQL" class="registry-technology__field">
+                    <template #prepend><q-icon name="database" size="19px" /></template>
+                  </q-input>
+                  <q-input v-model.trim="form.tech_stack.server_type" outlined label="Server type" placeholder="e.g. Cloud, On-premises" class="registry-technology__field">
+                    <template #prepend><q-icon name="cloud_queue" size="19px" /></template>
+                  </q-input>
+                  <q-input v-model.trim="form.tech_stack.server_name" outlined label="Server name" placeholder="e.g. Application Server 01" class="registry-technology__field registry-technology__server-name">
+                    <template #prepend><q-icon name="computer" size="19px" /></template>
+                  </q-input>
+                </div>
+              </section>
             </div>
             <div v-show="formStep === 6" class="registry-wizard-content">
 
-            <q-select v-model="form.repo.development_solution_type" outlined clearable label="Development solution type" :options="library.developmentSolutionTypes" option-label="name" option-value="id" emit-value map-options />
-            <q-input v-model.trim="form.repo.repo_git" outlined label="Git repository URL" />
-            <div class="registry-form__grid">
-              <q-input v-model.trim="form.repo.staging_url" outlined label="Staging URL" />
-              <q-input v-model.trim="form.repo.production_url" outlined label="Production URL" />
+            <div v-if="isFullstackSolution" class="registry-repository-pair">
+              <section v-for="scope in repositoryScopes" :key="scope" class="registry-repository-section registry-repository-card">
+                <div class="registry-repository-section__header">
+                  <q-icon :name="scope === 'frontend' ? 'desktop_windows' : 'dns'" size="23px" />
+                  <div><h3>{{ scope === 'frontend' ? 'Frontend Repository' : 'Backend Repository' }}</h3><p>Git source and environment URLs</p></div>
+                </div>
+                <div class="registry-repository-fields">
+                  <q-input v-model.trim="form.repo[`${scope}_repo_git`]" outlined label="Git Repository URL" type="url" />
+                  <q-input v-model.trim="form.repo[`${scope}_staging_url`]" outlined label="Staging URL" type="url" />
+                  <q-input v-model.trim="form.repo[`${scope}_production_url`]" outlined label="Production URL" type="url" />
+                </div>
+              </section>
             </div>
+            <section v-else class="registry-repository-section registry-repository-card">
+              <div class="registry-repository-section__header"><q-icon name="source" size="23px" /><div><h3>Repository and Deployment URLs</h3><p>One repository for this development solution.</p></div></div>
+              <div class="registry-repository-fields">
+                <q-input v-model.trim="form.repo.repo_git" outlined label="Git Repository URL" type="url" />
+                <q-input v-model.trim="form.repo.staging_url" outlined label="Staging URL" type="url" />
+                <q-input v-model.trim="form.repo.production_url" outlined label="Production URL" type="url" />
+              </div>
+            </section>
 
             </div>
             </q-card-section>
@@ -518,9 +630,258 @@
             <div class="q-mr-auto"></div>
             <q-btn v-if="formStep > 1" flat no-caps icon="arrow_back" label="Back" :disable="saving" @click="formStep--" />
             <q-btn v-if="formStep < stepLabels.length" unelevated no-caps color="indigo-9" icon-right="arrow_forward" label="Next" :disable="saving" @click="nextStep" />
-            <q-btn v-else unelevated no-caps type="submit" color="indigo-9" :loading="saving" label="Save Changes" />
+            <q-btn unelevated no-caps type="submit" color="primary" icon="save" label="Save Changes" :loading="saving" :disable="saving" aria-label="Save registry changes and close modal" />
+            <q-btn v-if="formStep === stepLabels.length" unelevated no-caps type="button" color="indigo-9" icon-right="play_arrow" label="Execute" :disable="saving" aria-label="Review task generation acknowledgement" @click="requestScrumExecution" />
           </q-card-actions>
         </q-form>
+      </q-card>
+    </q-dialog>
+
+    <!-- Confirm the implications of Execute before opening the frontend-only planning preview. -->
+    <q-dialog v-model="scrumAcknowledgementOpen" persistent transition-show="scale" transition-hide="scale">
+      <q-card class="registry-execution-confirm">
+        <header class="registry-execution-confirm__header">
+          <div class="registry-execution-confirm__icon"><q-icon name="auto_awesome" size="28px" /></div>
+          <div class="registry-execution-confirm__heading">
+            <span class="registry-execution-confirm__eyebrow">ONE ICTMS · PROJECT EXECUTION</span>
+            <h2>Confirm AI Task Generation</h2>
+            <p>Review and acknowledge the next step before entering Scrum Planning.</p>
+          </div>
+          <q-btn flat round dense icon="close" color="white" aria-label="Cancel execution" @click="cancelScrumExecution" />
+        </header>
+        <q-card-section class="registry-execution-confirm__body">
+          <div class="registry-execution-confirm__intro">
+            <q-icon name="info_outline" size="21px" />
+            <p>By proceeding, you acknowledge that the execution workflow is intended to generate suggested development tasks based on the following project documents. The Project Manager or Scrum Master must evaluate the tasks before scheduling them into sprints.</p>
+          </div>
+          <div class="registry-execution-confirm__section-title">Source documents for task generation</div>
+          <div class="registry-execution-confirm__docs">
+            <div v-for="doc in scrumAcknowledgementDocuments" :key="doc.code" class="registry-execution-confirm__doc">
+              <div class="registry-execution-confirm__doc-icon"><q-icon :name="doc.icon" size="21px" /></div>
+              <div><strong>{{ doc.name }}</strong><span>{{ doc.code }}</span></div>
+              <q-icon name="description" class="registry-execution-confirm__doc-mark" size="19px" />
+            </div>
+          </div>
+          <div class="registry-execution-confirm__preview-note">
+            <q-icon name="science" size="19px" />
+            <span><strong>Frontend preview:</strong> The next screen currently uses sample tasks. No AI request is sent, and no tasks or sprint plans are saved.</span>
+          </div>
+          <q-checkbox v-model="scrumExecutionAcknowledged" color="indigo-9" class="registry-execution-confirm__checkbox"
+            label="I understand that suggested tasks require Project Manager or Scrum Master review before sprint planning." />
+        </q-card-section>
+        <q-separator />
+        <q-card-actions align="right" class="registry-execution-confirm__footer">
+          <q-btn flat no-caps color="grey-8" label="Cancel" @click="cancelScrumExecution" />
+          <q-btn unelevated no-caps color="indigo-9" icon-right="arrow_forward" label="Acknowledge & Continue"
+            :disable="!scrumExecutionAcknowledged" @click="confirmScrumExecution" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- FRONTEND-ONLY PREVIEW: AI tasks and sprint planning are local UI examples, not persisted. -->
+    <q-dialog v-model="scrumPlanningOpen" persistent maximized transition-show="slide-up" transition-hide="slide-down">
+      <q-card class="scrum-planner">
+        <header class="scrum-planner__header">
+          <div class="scrum-planner__identity">
+            <div class="scrum-planner__mark"><q-icon name="auto_awesome" size="26px" /></div>
+            <div>
+              <div class="scrum-planner__eyebrow">ONE ICTMS <span> / </span> PROJECT DELIVERY</div>
+              <h2>Scrum Planning</h2>
+              <p>Review document-aligned tasks and organize approved work into sprints.</p>
+            </div>
+          </div>
+          <div class="scrum-planner__header-actions">
+            <q-badge class="scrum-planner__preview-badge">UI PREVIEW · NO TASKS SAVED</q-badge>
+            <q-btn flat round icon="close" color="white" aria-label="Close Scrum planning" @click="scrumPlanningOpen = false" />
+          </div>
+        </header>
+
+        <div class="scrum-planner__overview">
+          <div class="scrum-planner__project">
+            <span class="scrum-planner__project-icon"><q-icon name="dns" size="24px" /></span>
+            <div><small>ACTIVE SYSTEM</small><strong>{{ form.system_name || 'Unnamed System' }}</strong><span>{{ form.alias || 'Information System' }}</span></div>
+          </div>
+          <div class="scrum-planner__metric"><q-icon name="task_alt" /><div><strong>{{ scrumTasks.length }}</strong><span>Development tasks</span></div></div>
+          <div class="scrum-planner__metric"><q-icon name="fact_check" /><div><strong>{{ reviewedScrumTasks }}</strong><span>Evaluated</span></div></div>
+          <div class="scrum-planner__metric"><q-icon name="view_kanban" /><div><strong>{{ scheduledScrumTasks }}</strong><span>In sprint plan</span></div></div>
+          <div class="scrum-planner__metric"><q-icon name="description" /><div><strong>4</strong><span>Source document types</span></div></div>
+        </div>
+
+        <div class="scrum-planner__notice">
+          <q-icon name="info_outline" size="19px" />
+          <span><strong>Frontend preview.</strong> Proposed development tasks mapped to Public User stories and acceptance criteria from the Phase 1 LGBTQIA+ workbook. These are not generated from uploaded documents; review and sprint changes are not saved.</span>
+        </div>
+
+        <div class="scrum-planner__workspace">
+          <section class="scrum-planner__column scrum-planner__column--sprint" aria-labelledby="scrum-sprint-title">
+            <div class="scrum-planner__column-head">
+              <div class="scrum-planner__column-title"><span class="scrum-planner__column-icon scrum-planner__column-icon--sprint"><q-icon name="view_kanban" size="22px" /></span>
+                <div><h3 id="scrum-sprint-title">Sprint Plan</h3><p>Project Manager / Scrum Master workspace</p></div>
+              </div>
+              <q-btn round flat dense icon="add" color="indigo-9" aria-label="Add sprint" @click="addScrumSprint"><q-tooltip>Add sprint</q-tooltip></q-btn>
+            </div>
+            <div class="scrum-planner__sprint-tabs" role="group" aria-label="Available sprints">
+              <button v-for="sprint in scrumSprints" :key="sprint.id" type="button" class="scrum-planner__sprint-tab"
+                :class="{ 'is-selected': activeSprintId === sprint.id }" @click="activeSprintId = sprint.id">{{ sprint.name }} <span>{{ countScrumSprintTasks(sprint.id) }}</span></button>
+            </div>
+            <div class="scrum-planner__sprint-summary">
+              <div><span>SELECTED SPRINT</span><strong>{{ activeScrumSprintName }}</strong></div>
+              <div><span>ESTIMATED EFFORT</span><strong>{{ activeScrumSprintPoints }} story points</strong></div>
+            </div>
+            <div class="scrum-planner__dropzone" :class="{ 'is-over': scrumDropOver }" @dragover.prevent="scrumDropOver = true" @dragleave="scrumDropOver = false" @drop.prevent="onScrumDropToSprint">
+              <div v-if="activeScrumSprintTasks.length === 0" class="scrum-planner__drop-hint">
+                <span class="scrum-planner__drop-icon"><q-icon name="move_to_inbox" size="35px" /></span>
+                <strong>Build your sprint backlog</strong><p>Approve eligible tasks first, then drag them here or select <b>Plan</b>.</p>
+                <span>Review decisions stay visible on each task.</span>
+              </div>
+              <article v-for="task in activeScrumSprintTasks" :key="task.id" class="scrum-planner__planned-task" draggable="true"
+                @dragstart="onScrumDragStart($event, task.id)" @dragend="scrumDraggingId = null">
+                <div class="scrum-planner__task-meta"><span class="scrum-planner__category" :class="`scrum-planner__category--${task.category.toLowerCase().replace('/', '-')}`">{{ task.category }}</span><q-icon name="drag_indicator" class="scrum-planner__drag-handle" /></div>
+                <h4>{{ task.title }}</h4>
+                <div class="scrum-planner__planned-context">{{ task.category }} · {{ task.module }} · {{ task.userStory }}</div>
+                <div class="scrum-planner__planned-context">Dependencies: {{ task.dependencies.length ? task.dependencies.join(', ') : 'None' }}</div>
+                <div class="scrum-planner__planned-bottom"><span>{{ task.points }} pts · {{ task.priority }} priority</span><span class="scrum-planner__review-state" :class="`is-${task.review}`">{{ scrumReviewLabel(task.review) }}</span></div>
+                <div class="scrum-planner__planned-actions">
+                  <q-btn flat dense no-caps icon="check_circle_outline" label="Approve" color="positive" :disable="task.review === 'approved'" @click="task.review = 'approved'" />
+                  <q-btn flat dense no-caps icon="undo" label="Backlog" color="indigo-9" @click="moveScrumTask(task.id, null)" />
+                </div>
+              </article>
+            </div>
+            <div class="scrum-planner__sprint-footer"><q-icon name="verified_user" size="18px" /><span>Project Manager / Scrum Master review required before sprint execution.</span></div>
+          </section>
+
+          <section class="scrum-planner__column scrum-planner__column--suggestions" aria-labelledby="scrum-suggestions-title">
+            <div class="scrum-planner__column-head">
+              <div class="scrum-planner__column-title">
+                <span class="scrum-planner__column-icon scrum-planner__column-icon--ai"><q-icon name="auto_awesome" size="22px" /></span>
+                <div><h3 id="scrum-suggestions-title">Task Suggestions</h3><p>Development backlog · approve before planning</p></div>
+              </div>
+              <q-badge class="scrum-planner__count">{{ unscheduledScrumTasks }} unplanned</q-badge>
+            </div>
+            <div class="scrum-planner__view-tabs" role="tablist" aria-label="Task connections">
+              <button type="button" role="tab" :aria-selected="scrumTaskView === 'categories'" class="scrum-planner__view-tab"
+                :class="{ 'is-selected': scrumTaskView === 'categories' }" @click="scrumTaskView = 'categories'">
+                <q-icon name="category" size="16px" /> Task List
+              </button>
+              <button type="button" role="tab" :aria-selected="scrumTaskView === 'traceability'" class="scrum-planner__view-tab"
+                :class="{ 'is-selected': scrumTaskView === 'traceability' }" @click="scrumTaskView = 'traceability'">
+                <q-icon name="account_tree" size="16px" /> Traceability View
+              </button>
+            </div>
+            <div v-if="scrumTaskView === 'categories'" class="scrum-planner__filters" role="group" aria-label="Filter tasks by development category">
+              <button v-for="category in scrumCategoryFilters" :key="category" type="button" class="scrum-planner__filter"
+                :class="{ 'is-selected': scrumCategoryFilter === category }" @click="scrumCategoryFilter = category">{{ category }}</button>
+            </div>
+            <div v-else class="scrum-planner__connection-panel">
+              <div class="scrum-planner__connection-label">User Stories</div>
+              <div class="scrum-planner__connection-tabs" role="tablist" aria-label="Select user story">
+                <button v-for="story in scrumUserStories" :key="story" type="button" role="tab"
+                  :aria-selected="selectedScrumStory === story" class="scrum-planner__filter"
+                  :class="{ 'is-selected': selectedScrumStory === story }" @click="selectScrumStory(story)">
+                  {{ story.split(':')[0] }} <span class="scrum-planner__connection-count">{{ scrumTasks.filter(task => task.userStory === story).length }}</span>
+                </button>
+              </div>
+              <div v-if="selectedScrumStory" class="scrum-planner__connection-story"><q-icon name="menu_book" size="17px" /> {{ selectedScrumStory }}</div>
+              <div class="scrum-planner__connection-caption">Expand an acceptance criterion to see every generated task linked to its module, including tasks already assigned to sprints.</div>
+            </div>
+            <div v-if="scrumTaskView === 'categories'" class="scrum-planner__task-list" @dragover.prevent @drop="onScrumDropToBacklog">
+              <section v-for="group in visibleScrumTaskGroups" :key="group.key" class="scrum-planner__module-group">
+                <article v-for="task in group.tasks" :key="task.id" class="scrum-planner__task"
+                draggable="true" @dragstart="onScrumDragStart($event, task.id)" @dragend="scrumDraggingId = null"
+                :class="{ 'is-dragging': scrumDraggingId === task.id }">
+                <div class="scrum-planner__task-meta">
+                  
+                  <span class="scrum-planner__category" :class="`scrum-planner__category--${task.category.toLowerCase().replace('/', '-')}`">{{ task.category }}</span>
+                  <q-icon name="drag_indicator" class="scrum-planner__drag-handle" aria-label="Drag task" />
+                </div>
+                <h4>{{ task.title }}</h4>
+                <div class="scrum-planner__trace">
+                  <div><b>User Story</b><span>{{ task.userStory }}</span></div>
+                  <div><b>Acceptance Criteria</b><span>{{ task.acceptanceCriteria }}</span></div>
+                  <div><b>Module</b><span>{{ task.module }}</span></div>
+                  <div><b>Task</b><span>{{ task.title }}</span></div>
+                  <div><b>Task Details</b><span>{{ task.description }}</span></div>
+                  <div><b>Task Dependencies</b><span>{{ task.dependencies.length ? task.dependencies.join(', ') : 'None' }}</span></div>
+                  <div><b>Source Document</b><span>{{ task.source }}</span></div>
+                </div>
+                <div class="scrum-planner__task-bottom">
+                  <div class="scrum-planner__tags"><span><q-icon name="schedule" size="14px" /> {{ task.points }} pts</span><span>{{ task.priority }} priority</span></div>
+                  <span class="scrum-planner__review-state" :class="`is-${task.review}`">{{ scrumReviewLabel(task.review) }}</span>
+                </div>
+                <div class="scrum-planner__review-actions">
+                  <q-btn flat dense no-caps icon="check_circle_outline" label="Approve" color="positive" :disable="task.review === 'approved'" @click="task.review = 'approved'" />
+                  <q-btn flat dense no-caps icon="rate_review" label="Needs revision" color="orange-9" :disable="task.review === 'revision'" @click="task.review = 'revision'" />
+                  <q-btn v-if="task.sprintId === null" flat dense no-caps icon="add_circle_outline" label="Plan" color="indigo-9" :disable="!canPlanScrumTask(task)" @click="moveScrumTask(task.id, activeSprintId)" />
+                  <q-btn v-else flat dense no-caps icon="undo" label="Return to Backlog" color="indigo-9" @click="moveScrumTask(task.id, null)" />
+                </div>
+                </article>
+              </section>
+              <div v-if="visibleScrumSuggestions.length === 0" class="scrum-planner__empty"><q-icon name="inventory_2" size="32px" /><strong>No matching tasks</strong><span>Choose another category, user story, or acceptance criterion.</span></div>
+            </div>
+            <div v-else class="scrum-planner__task-list scrum-planner__trace-accordion" @dragover.prevent @drop="onScrumDropToBacklog">
+              <q-expansion-item v-for="(criterion, index) in scrumStoryCriteria" :key="`${selectedScrumStory}-${criterion}`"
+                expand-separator dense-toggle class="scrum-planner__criterion-item" header-class="scrum-planner__criterion-header"
+                :default-opened="index === 0">
+                <template #header>
+                  <q-item-section avatar><q-icon name="fact_check" color="indigo-8" size="20px" /></q-item-section>
+                  <q-item-section>
+                    <q-item-label class="text-weight-medium">AC-{{ String(index + 1).padStart(2, '0') }} · {{ criterion }}</q-item-label>
+                    <q-item-label caption>{{ scrumTasks.filter(task => task.userStory === selectedScrumStory && task.acceptanceCriteria === criterion).length }} tasks generated</q-item-label>
+                  </q-item-section>
+                </template>
+                <div class="scrum-planner__criterion-body">
+                  <section v-for="group in scrumGroupsForCriterion(criterion)" :key="group.module" class="scrum-planner__module-group">
+                    <div class="scrum-planner__module-heading">
+                      <div class="scrum-planner__module-title"><q-icon name="layers" size="18px" /><strong>Module: {{ group.module }}</strong><span>{{ group.tasks.length }} tasks</span></div>
+                      <div class="scrum-planner__generated-heading"><q-icon name="list_alt" size="16px" /> Generated Tasks ({{ group.tasks.length }})</div>
+                    </div>
+                    <article v-for="task in group.tasks" :key="task.id" class="scrum-planner__trace-task-row"
+                      draggable="true" @dragstart="onScrumDragStart($event, task.id)" @dragend="scrumDraggingId = null">
+                      <button type="button" class="scrum-planner__trace-task-toggle"
+                        :aria-expanded="expandedScrumTaskId === task.id"
+                        :aria-controls="`scrum-task-detail-${task.id}`"
+                        @click="expandedScrumTaskId = expandedScrumTaskId === task.id ? null : task.id">
+                        <span class="scrum-planner__trace-task-code">{{ task.id }}</span>
+                        <span class="scrum-planner__trace-task-name">{{ task.title }}</span>
+                        <span class="scrum-planner__category" :class="`scrum-planner__category--${task.category.toLowerCase().replace('/', '-')}`">{{ task.category }}</span>
+                        <q-icon :name="expandedScrumTaskId === task.id ? 'expand_less' : 'expand_more'" size="18px" class="scrum-planner__trace-task-chevron" />
+                      </button>
+                      <div class="scrum-planner__trace-task-subtitle">
+                        <span>{{ task.sprintId !== null ? (scrumSprints.find(sprint => sprint.id === task.sprintId)?.name || 'Assigned to sprint') : 'Unplanned backlog' }}</span>
+                        <span>·</span>
+                        <span>{{ scrumReviewLabel(task.review) }}</span>
+                      </div>
+                      <div v-if="expandedScrumTaskId === task.id" :id="`scrum-task-detail-${task.id}`" class="scrum-planner__trace-task-details">
+                        <div class="scrum-planner__trace">
+                          <div><b>Task Code</b><span>{{ task.id }}</span></div>
+                          <div><b>Task Details</b><span>{{ task.description }}</span></div>
+                          <div><b>Dependencies</b><span>{{ task.dependencies.length ? task.dependencies.map(id => `${id}: ${scrumTasks.find(item => item.id === id)?.title || 'Unknown task'}`).join(', ') : 'None' }}</span></div>
+                          <div><b>Source Document</b><span>{{ task.source }}</span></div>
+                        </div>
+                        <div class="scrum-planner__task-bottom">
+                          <div class="scrum-planner__tags"><span><q-icon name="schedule" size="14px" /> {{ task.points }} pts</span><span>{{ task.priority }} priority</span></div>
+                          <span class="scrum-planner__review-state" :class="`is-${task.review}`">{{ scrumReviewLabel(task.review) }}</span>
+                        </div>
+                        <div class="scrum-planner__review-actions">
+                          <q-btn flat dense no-caps icon="check_circle_outline" label="Approve" color="positive" :disable="task.review === 'approved'" @click="task.review = 'approved'" />
+                          <q-btn flat dense no-caps icon="rate_review" label="Needs revision" color="orange-9" :disable="task.review === 'revision'" @click="task.review = 'revision'" />
+                          <q-btn v-if="task.sprintId === null" flat dense no-caps icon="add_circle_outline" label="Plan" color="indigo-9" :disable="!canPlanScrumTask(task)" @click="moveScrumTask(task.id, activeSprintId)" />
+                          <q-btn v-else flat dense no-caps icon="undo" label="Return to Backlog" color="indigo-9" @click="moveScrumTask(task.id, null)" />
+                        </div>
+                      </div>
+                    </article>
+                  </section>
+                </div>
+              </q-expansion-item>
+              <div v-if="scrumStoryCriteria.length === 0" class="scrum-planner__empty">No generated tasks linked to this story.</div>
+            </div>
+          </section>
+        </div>
+        <footer class="scrum-planner__footer">
+          <span><q-icon name="cloud_off" size="17px" /> Demo planning session · Changes are not saved</span>
+          <div><q-btn flat no-caps color="indigo-9" label="Close Preview" @click="scrumPlanningOpen = false" />
+            <q-btn unelevated no-caps color="indigo-9" icon="task_alt" label="Planning Preview Only" disable /></div>
+        </footer>
       </q-card>
     </q-dialog>
 
@@ -568,10 +929,19 @@ import { errorMessage } from '@/services/http'
 import { libraryApi, type DepartmentUser, type LibraryOption } from '@/services/library-api'
 import type { RegistryPayload, RegistryRecord } from '@/types/registry'
 
+type RegistryRepositoryForm = NonNullable<RegistryPayload['repo']> & {
+  frontend_repo_git?: string | null
+  frontend_staging_url?: string | null
+  frontend_production_url?: string | null
+  backend_repo_git?: string | null
+  backend_staging_url?: string | null
+  backend_production_url?: string | null
+}
+
 type RegistryForm = Omit<RegistryPayload, 'status' | 'desc' | 'repo' | 'tech_stack' | 'stakeholders' | 'docs'> & {
   status: number | null
   desc: NonNullable<RegistryPayload['desc']>
-  repo: NonNullable<RegistryPayload['repo']>
+  repo: RegistryRepositoryForm
   tech_stack: NonNullable<RegistryPayload['tech_stack']>
   stakeholders: NonNullable<RegistryPayload['stakeholders']>
   docs: NonNullable<RegistryPayload['docs']>
@@ -584,12 +954,22 @@ const systems = ref<RegistryRecord[]>([])
 const selected = ref<RegistryRecord | null>(null)
 // The view endpoint includes relation labels and row metadata in addition to the editable payload.
 // Keep a snapshot of that response for the read-only Details tab.
+type RegistryScopedRepo = {
+  repo_scope: string
+  repo_git?: string | null
+  staging_url?: string | null
+  production_url?: string | null
+  development_solution_type?: number | null
+}
+type RegistryApiWithRepos = RegistryRecord & { repos?: RegistryScopedRepo[] }
+
 type DetailsApiRecord = {
   id?: number
   business_owner_department?: { id?: number; alias?: string; name?: string } | null
   status_name?: string | null
   desc?: { managing_type_name?: string | null; managing_office_department?: { id?: number; alias?: string; name?: string } | null; id?: number; registry_id?: number } | null
   repo?: { development_solution_type_name?: string | null; id?: number; registry_id?: number; created_at?: string; updated_at?: string } | null
+  repos?: RegistryScopedRepo[]
   tech_stack?: { id?: number; registry_id?: number; created_at?: string; updated_at?: string } | null
   stakeholders?: Array<{ id?: number; registry_id?: number; user_id: number; stakeholder_type: number; stakeholder_type_name?: string; created_at?: string; updated_at?: string }>
   docs?: Array<{ id?: number; registry_id?: number; docs_type: number; docs_type_name?: string; file_path: string; created_at?: string; updated_at?: string }>
@@ -663,10 +1043,18 @@ const registryOverviewSections = computed<{ title: string; icon: string; fields:
     ] },
     { title: 'Repository & Deployment', icon: 'account_tree', fields: [
       { label: 'Development Solution Type', value: snapshot?.repo?.development_solution_type_name || (repo.development_solution_type == null ? '—' : library.labelFor('developmentSolutionTypes', repo.development_solution_type)) },
-
-      { label: 'Git Repository', value: dash(repo.repo_git), wide: true },
-      { label: 'Staging URL', value: dash(repo.staging_url) },
-      { label: 'Production URL', value: dash(repo.production_url) },
+      ...(isFullstackSolution.value ? [
+        { label: 'Frontend Git Repository', value: dash(repo.frontend_repo_git), wide: true },
+        { label: 'Frontend Staging URL', value: dash(repo.frontend_staging_url) },
+        { label: 'Frontend Production URL', value: dash(repo.frontend_production_url) },
+        { label: 'Backend Git Repository', value: dash(repo.backend_repo_git), wide: true },
+        { label: 'Backend Staging URL', value: dash(repo.backend_staging_url) },
+        { label: 'Backend Production URL', value: dash(repo.backend_production_url) },
+      ] : [
+        { label: 'Git Repository', value: dash(repo.repo_git), wide: true },
+        { label: 'Staging URL', value: dash(repo.staging_url) },
+        { label: 'Production URL', value: dash(repo.production_url) },
+      ]),
     ] },
   ]
 })
@@ -678,6 +1066,158 @@ const loadError = ref('')
 const saving = ref(false)
 const formOpen = ref(false)
 const profileOpen = ref(false)
+// Frontend-only Scrum Planning preview. Task hierarchy follows ONE ICTMS traceability.
+type ScrumSource = 'BRD' | 'SRS' | 'SDD' | 'User Stories'
+type ScrumCategory = 'Frontend' | 'Backend' | 'DB' | 'UI/UX'
+type ScrumReview = 'pending' | 'approved' | 'revision'
+type ScrumDemoTask = {
+  id: string; source: ScrumSource; category: ScrumCategory
+  userStory: string; acceptanceCriteria: string; module: string
+  title: string; description: string; dependencies: string[]
+  points: number; priority: 'High' | 'Medium' | 'Low'
+  review: ScrumReview; sprintId: number | null
+}
+type ScrumDemoSprint = { id: number; name: string }
+// Illustrative tasks only: replace with API output based on the actual project documents.
+// Proposed implementation examples derived from Phase 1 LGBTQIA+ Public User user stories.
+// These are not actual AI output and are not extracted from BRD/SRS/SDD.
+const demoScrumTasks: ScrumDemoTask[] = [
+  { id: "DB-01", source: "User Stories", category: "DB", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "The feed must be automated; when a new Activity or News item is published in the backend, it must automatically push to the top of the Home Page.", module: "Latest Highlights", title: "Design highlight content schema", description: "Create content metadata and publication-status/date fields needed to order highlights.", dependencies: [], points: 3, priority: "High", review: "pending", sprintId: null },
+  { id: "BE-01", source: "User Stories", category: "Backend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "The feed must be automated; when a new Activity or News item is published in the backend, it must automatically push to the top of the Home Page.", module: "Latest Highlights", title: "Build latest highlights API", description: "Return newly published activities and news ordered by publication date, latest first.", dependencies: ["DB-01"], points: 5, priority: "High", review: "pending", sprintId: null },
+  { id: "FE-01", source: "User Stories", category: "Frontend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "The feed must be automated; when a new Activity or News item is published in the backend, it must automatically push to the top of the Home Page.", module: "Latest Highlights", title: "Connect home feed to published content", description: "Request published highlights and refresh the card list on page load.", dependencies: ["BE-01"], points: 3, priority: "High", review: "pending", sprintId: null },
+  { id: "UX-01", source: "User Stories", category: "UI/UX", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "Each post card must include a Category Tag (e.g., \"Event,\" \"Success Story\"), a Title, Description, Category, Date Published and a \"Share to Social Media\" option.", module: "Highlights Cards", title: "Design responsive highlight cards", description: "Design cards displaying category, title, description, publication date, and share action.", dependencies: [], points: 3, priority: "Medium", review: "pending", sprintId: null },
+  { id: "FE-02", source: "User Stories", category: "Frontend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "Each post card must include a Category Tag (e.g., \"Event,\" \"Success Story\"), a Title, Description, Category, Date Published and a \"Share to Social Media\" option.", module: "Highlights Cards", title: "Implement highlight cards and share controls", description: "Build reusable card components including the required metadata and social sharing affordance.", dependencies: ["UX-01", "FE-01"], points: 5, priority: "High", review: "pending", sprintId: null },
+  { id: "FE-03", source: "User Stories", category: "Frontend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "If a post contains a video, a \"Play\" icon must overlay the thumbnail.", module: "Highlights Media", title: "Render video play overlay", description: "Detect video highlights and render an accessible play control on the thumbnail.", dependencies: ["FE-02"], points: 2, priority: "High", review: "pending", sprintId: null },
+  { id: "FE-04", source: "User Stories", category: "Frontend", userStory: "US-02: As a Public User, I want to share LGBTQ-related highlights from the Home Page with others.", acceptanceCriteria: "Upon selection, the system automatically redirects and sends the content to the chosen platform", module: "Social Sharing", title: "Implement social-share redirect", description: "Open a supported sharing URL with the selected published highlight link.", dependencies: [], points: 3, priority: "High", review: "pending", sprintId: null },
+  { id: "UX-02", source: "User Stories", category: "UI/UX", userStory: "US-02: As a Public User, I want to share LGBTQ-related highlights from the Home Page with others.", acceptanceCriteria: "The system presents the option for Facebook.", module: "Social Sharing", title: "Design Facebook sharing option", description: "Define the share control behavior and accessible label for Facebook sharing.", dependencies: [], points: 2, priority: "Medium", review: "pending", sprintId: null },
+  { id: "FE-05", source: "User Stories", category: "Frontend", userStory: "US-02: As a Public User, I want to share LGBTQ-related highlights from the Home Page with others.", acceptanceCriteria: "The system presents the option for Facebook.", module: "Social Sharing", title: "Add Facebook sharing option", description: "Expose the Facebook choice and connect it to the sharing redirect.", dependencies: ["UX-02", "FE-04"], points: 2, priority: "High", review: "pending", sprintId: null },
+  { id: "FE-06", source: "User Stories", category: "Frontend", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "The text must support rich formatting (e.g., Bold, Italics, and Bullet points) to highlight key milestones.", module: "About Us", title: "Render formatted About Us content", description: "Support headings, bold, italic, and bullet lists in content display.", dependencies: [], points: 3, priority: "Medium", review: "pending", sprintId: null },
+  { id: "UX-03", source: "User Stories", category: "UI/UX", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "The Mission, Vision, Core Values, Organization History and Leadership Profile must be visually distinct (e.g., placed in a styled box or using specific headings).", module: "About Us", title: "Design About Us information layout", description: "Create distinct responsive sections for mission, vision, values, history, and leadership.", dependencies: [], points: 3, priority: "Medium", review: "pending", sprintId: null },
+  { id: "FE-07", source: "User Stories", category: "Frontend", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "The Mission, Vision, Core Values, Organization History and Leadership Profile must be visually distinct (e.g., placed in a styled box or using specific headings).", module: "About Us", title: "Implement About Us sections", description: "Build and style the five content sections with clear hierarchy.", dependencies: ["UX-03"], points: 3, priority: "High", review: "pending", sprintId: null },
+  { id: "FE-08", source: "User Stories", category: "Frontend", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "If a \"History\" image or brand photo is included, it must be responsive and centered.", module: "About Us Media", title: "Implement responsive history image", description: "Center optional images and provide responsive sizing and alternate text.", dependencies: ["FE-07"], points: 2, priority: "Medium", review: "pending", sprintId: null },
+]
+const scrumAcknowledgementOpen = ref(false)
+const scrumExecutionAcknowledged = ref(false)
+const scrumAcknowledgementDocuments = [
+  { code: 'BRD', name: 'Business Requirements Document', icon: 'assignment' },
+  { code: 'SRS', name: 'Software Requirements Specification', icon: 'rule' },
+  { code: 'SDD', name: 'System Design Document', icon: 'architecture' },
+  { code: 'User Stories', name: 'User Stories', icon: 'format_list_bulleted' },
+] as const
+function requestScrumExecution(): void {
+  scrumExecutionAcknowledged.value = false
+  scrumAcknowledgementOpen.value = true
+}
+function cancelScrumExecution(): void {
+  scrumAcknowledgementOpen.value = false
+  scrumExecutionAcknowledged.value = false
+}
+function confirmScrumExecution(): void {
+  if (!scrumExecutionAcknowledged.value) return
+  scrumAcknowledgementOpen.value = false
+  openScrumPlanning()
+}
+const scrumPlanningOpen = ref(false)
+const scrumTasks = ref<ScrumDemoTask[]>([])
+const scrumSprints = ref<ScrumDemoSprint[]>([{ id: 1, name: 'Sprint 1' }, { id: 2, name: 'Sprint 2' }])
+const activeSprintId = ref(1)
+const scrumCategoryFilter = ref('All Categories')
+const scrumCategoryFilters = ['All Categories', 'Frontend', 'Backend', 'DB', 'UI/UX'] as const
+const scrumTaskView = ref<'categories' | 'traceability'>('categories')
+const expandedScrumTaskId = ref<string | null>(null)
+const selectedScrumStory = ref<string | null>(null)
+const selectedScrumCriterion = ref<string | null>(null)
+const scrumUserStories = computed(() => [...new Set(scrumTasks.value.map(task => task.userStory))])
+const scrumStoryCriteria = computed(() => [...new Set(scrumTasks.value.filter(task => task.userStory === selectedScrumStory.value).map(task => task.acceptanceCriteria))])
+function selectScrumStory(story: string): void {
+  selectedScrumStory.value = story
+  selectedScrumCriterion.value = null
+}
+const scrumDraggingId = ref<string | null>(null)
+const scrumDropOver = ref(false)
+const reviewedScrumTasks = computed(() => scrumTasks.value.filter(task => task.review !== 'pending').length)
+const scheduledScrumTasks = computed(() => scrumTasks.value.filter(task => task.sprintId !== null).length)
+const unscheduledScrumTasks = computed(() => scrumTasks.value.filter(task => task.sprintId === null).length)
+const visibleScrumSuggestions = computed(() => scrumTasks.value.filter(task => {
+  if (scrumTaskView.value === 'categories') return task.sprintId === null && (scrumCategoryFilter.value === 'All Categories' || task.category === scrumCategoryFilter.value)
+  return task.userStory === selectedScrumStory.value && (selectedScrumCriterion.value === null || task.acceptanceCriteria === selectedScrumCriterion.value)
+}))
+// Connect each acceptance criterion to its module and the actual tasks created for it.
+const visibleScrumTaskGroups = computed(() => {
+  if (scrumTaskView.value === 'categories') {
+    return [{ key: 'category-list', criterion: '', module: '', tasks: visibleScrumSuggestions.value }]
+  }
+  const groups = new Map<string, { key: string; criterion: string; module: string; tasks: ScrumDemoTask[] }>()
+  for (const task of visibleScrumSuggestions.value) {
+    const key = JSON.stringify([task.acceptanceCriteria, task.module])
+    let group = groups.get(key)
+    if (!group) {
+      group = { key, criterion: task.acceptanceCriteria, module: task.module, tasks: [] }
+      groups.set(key, group)
+    }
+    group.tasks.push(task)
+  }
+  return [...groups.values()]
+})
+function scrumGroupsForCriterion(criterion: string): { module: string; tasks: ScrumDemoTask[] }[] {
+  const groups = new Map<string, ScrumDemoTask[]>()
+  for (const task of scrumTasks.value) {
+    if (task.userStory !== selectedScrumStory.value || task.acceptanceCriteria !== criterion) continue
+    const tasks = groups.get(task.module) ?? []
+    tasks.push(task)
+    groups.set(task.module, tasks)
+  }
+  return [...groups].map(([module, tasks]) => ({ module, tasks }))
+}
+const activeScrumSprintTasks = computed(() => scrumTasks.value.filter(task => task.sprintId === activeSprintId.value))
+const activeScrumSprintName = computed(() => scrumSprints.value.find(sprint => sprint.id === activeSprintId.value)?.name ?? 'Sprint')
+const activeScrumSprintPoints = computed(() => activeScrumSprintTasks.value.reduce((sum, task) => sum + task.points, 0))
+function scrumReviewLabel(review: ScrumReview): string {
+  if (review === 'approved') return 'Approved'
+  if (review === 'revision') return 'Needs revision'
+  return 'Pending review'
+}
+function canPlanScrumTask(task: ScrumDemoTask): boolean {
+  return task.review === 'approved' && task.dependencies.every(dep => scrumTasks.value.find(candidate => candidate.id === dep)?.review === 'approved')
+}
+function countScrumSprintTasks(id: number): number { return scrumTasks.value.filter(task => task.sprintId === id).length }
+function openScrumPlanning(): void {
+  scrumTasks.value = demoScrumTasks.map(task => ({ ...task }))
+  scrumSprints.value = [{ id: 1, name: 'Sprint 1' }, { id: 2, name: 'Sprint 2' }]
+  activeSprintId.value = 1
+  scrumCategoryFilter.value = 'All Categories'
+  scrumTaskView.value = 'traceability'
+  selectedScrumStory.value = scrumUserStories.value[0] ?? null
+  selectedScrumCriterion.value = null
+  scrumDraggingId.value = null
+  scrumPlanningOpen.value = true
+}
+function addScrumSprint(): void {
+  const nextId = Math.max(0, ...scrumSprints.value.map(sprint => sprint.id)) + 1
+  scrumSprints.value.push({ id: nextId, name: `Sprint ${nextId}` })
+  activeSprintId.value = nextId
+}
+function moveScrumTask(id: string, sprintId: number | null): void {
+  const task = scrumTasks.value.find(item => item.id === id)
+  if (task && (sprintId === null || (task.review === 'approved' && task.dependencies.every(dep => scrumTasks.value.find(candidate => candidate.id === dep)?.review === 'approved')))) task.sprintId = sprintId
+}
+function onScrumDragStart(event: DragEvent, id: string): void {
+  scrumDraggingId.value = id
+  if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', id) }
+}
+function onScrumDropToSprint(event: DragEvent): void {
+  scrumDropOver.value = false
+  const id = event.dataTransfer?.getData('text/plain') || scrumDraggingId.value
+  if (id) moveScrumTask(id, activeSprintId.value)
+  scrumDraggingId.value = null
+}
+function onScrumDropToBacklog(event: DragEvent): void {
+  event.preventDefault()
+  const id = event.dataTransfer?.getData('text/plain') || scrumDraggingId.value
+  if (id) moveScrumTask(id, null)
+  scrumDraggingId.value = null
+}
+
 const formStep = ref(1)
 const stepLabels = ['System Profile', 'Management', 'Documents', 'Stakeholders', 'Technology Used', 'Repository']
 const wizardStepLabels = computed(() => editingId.value === null ? stepLabels : ['Details', ...stepLabels.slice(1)])
@@ -1134,12 +1674,55 @@ function emptyForm(): RegistryForm {
   return {
     system_name: '', alias: '', description: '', business_owner: null, status: null,
     desc: { managing_type: null, managing_office: null, third_party_company: null, project_roll_on: null, project_sign_off: null, estimation_project_duration: null },
-    repo: { development_solution_type: null, repo_git: null, staging_url: null, production_url: null },
+    repo: { development_solution_type: null, repo_git: null, staging_url: null, production_url: null,
+      frontend_repo_git: null, frontend_staging_url: null, frontend_production_url: null,
+      backend_repo_git: null, backend_staging_url: null, backend_production_url: null },
     tech_stack: { frontend_stack: [], backend_stack: [], database: null, server_type: null, server_name: null },
     stakeholders: [], docs: initialRegistryDocs(),
   }
 }
 
+const repositoryScopes = ['frontend', 'backend'] as const
+const isFullstackSolution = computed(() => {
+  const option = library.developmentSolutionTypes.find(item => Number(item.id) === Number(form.value.repo.development_solution_type))
+  return Boolean(option && /^FULLSTACK$/i.test(option.name.replace(/[^a-z]/gi, '')))
+})
+function solutionTypeIcon(label: string): string {
+  const token = label.toUpperCase().replace(/[^A-Z]/g, '')
+  if (token === 'FULLSTACK') return 'layers'
+  if (token === 'FRONTEND') return 'desktop_windows'
+  if (token === 'BACKEND') return 'dns'
+  if (token === 'MOBILE') return 'smartphone'
+  return 'computer'
+}
+function selectDevelopmentSolution(id: number): void {
+  // Keep both sets of values while switching the UI. Only the selected mode is submitted.
+  form.value.repo.development_solution_type = id
+}
+function reposFromApi(record: RegistryApiWithRepos): RegistryRepositoryForm {
+  const current = record.repo ?? null
+  const result: RegistryRepositoryForm = {
+    repo_git: current?.repo_git ?? null,
+    staging_url: current?.staging_url ?? null,
+    production_url: current?.production_url ?? null,
+    development_solution_type: current?.development_solution_type ?? null,
+  }
+  for (const repo of record.repos ?? []) {
+    if (repo.repo_scope === 'frontend' || repo.repo_scope === 'backend') {
+      const scope = repo.repo_scope
+      result[`${scope}_repo_git`] = repo.repo_git ?? null
+      result[`${scope}_staging_url`] = repo.staging_url ?? null
+      result[`${scope}_production_url`] = repo.production_url ?? null
+    } else if (repo.repo_scope === 'single') {
+      result.repo_git = repo.repo_git ?? null
+      result.staging_url = repo.staging_url ?? null
+      result.production_url = repo.production_url ?? null
+    }
+    result.development_solution_type ??= repo.development_solution_type ?? null
+  }
+  // Supports an API that returns the six scoped values in the legacy repo object.
+  return { ...result, ...(current ?? {}) }
+}
 const departmentOptions = computed(() => library.departments)
 const selectedStatusName = computed(() => library.registryStatuses.find(item => Number(item.id) === Number(form.value.status))?.name ?? '')
 const statusOptions = computed(() => library.registryStatuses.map(item => ({ label: item.name, value: item.id })))
@@ -1314,7 +1897,7 @@ async function openEdit(id: number): Promise<void> {
       business_owner: item.business_owner ?? null,
       status: item.status,
       desc: { ...blank.desc, ...(item.desc ?? {}) },
-      repo: { ...blank.repo, ...(item.repo ?? {}) },
+      repo: { ...blank.repo, ...reposFromApi(item) },
       tech_stack: { ...blank.tech_stack, ...(item.tech_stack ?? {}), frontend_stack: [...(item.tech_stack?.frontend_stack ?? [])], backend_stack: [...(item.tech_stack?.backend_stack ?? [])] },
       stakeholders: (item.stakeholders ?? []).map(i => ({ user_id: i.user_id, stakeholder_type: i.stakeholder_type })),
       docs: registryDocsForEdit((item.docs ?? []).map(i => ({ docs_type: i.docs_type, file_path: i.file_path }))),
@@ -1347,15 +1930,23 @@ function payloadForSave(): RegistryPayload {
       project_roll_on: value.desc.project_roll_on || null, project_sign_off: value.desc.project_sign_off || null,
       estimation_project_duration: value.desc.estimation_project_duration === null || value.desc.estimation_project_duration === undefined || String(value.desc.estimation_project_duration) === '' ? null : Number(value.desc.estimation_project_duration),
     },
-    repo: (
-      value.repo.development_solution_type != null ||
-      Boolean(value.repo.repo_git?.trim()) ||
-      Boolean(value.repo.staging_url?.trim()) ||
-      Boolean(value.repo.production_url?.trim())
-    ) ? {
-      development_solution_type: value.repo.development_solution_type ?? null,
-      repo_git: optionalText(value.repo.repo_git), staging_url: optionalText(value.repo.staging_url), production_url: optionalText(value.repo.production_url),
-    } : null,
+    repo: value.repo.development_solution_type != null ? (
+      isFullstackSolution.value ? {
+        development_solution_type: value.repo.development_solution_type,
+        // Backend service must persist these as two rows identified by repo_scope.
+        frontend_repo_git: optionalText(value.repo.frontend_repo_git),
+        frontend_staging_url: optionalText(value.repo.frontend_staging_url),
+        frontend_production_url: optionalText(value.repo.frontend_production_url),
+        backend_repo_git: optionalText(value.repo.backend_repo_git),
+        backend_staging_url: optionalText(value.repo.backend_staging_url),
+        backend_production_url: optionalText(value.repo.backend_production_url),
+      } : {
+        development_solution_type: value.repo.development_solution_type,
+        repo_git: optionalText(value.repo.repo_git),
+        staging_url: optionalText(value.repo.staging_url),
+        production_url: optionalText(value.repo.production_url),
+      }
+    ) : null,
     tech_stack: {
       frontend_stack: value.tech_stack.frontend_stack ?? [], backend_stack: value.tech_stack.backend_stack ?? [],
       database: optionalText(value.tech_stack.database), server_type: optionalText(value.tech_stack.server_type), server_name: optionalText(value.tech_stack.server_name),
@@ -1426,6 +2017,7 @@ function nextStep(): void {
   goToStep(formStep.value + 1)
 }
 async function saveSystem(): Promise<void> {
+  if (saving.value) return
   if (!form.value.system_name.trim() || form.value.status === null ||
       !library.registryStatuses.some(item => Number(item.id) === Number(form.value.status))) {
     formStep.value = 1
@@ -1731,14 +2323,40 @@ onMounted(() => {
 </style>
 
 <style scoped>
-/* New IS entry screen: a compact, independent System Profile modal. */
-.registry-profile-init-dialog{width:min(750px,94vw);max-width:750px;border-radius:18px;overflow:hidden}
-.registry-profile-init-header{display:flex;align-items:center;gap:14px;padding:22px 24px;background:linear-gradient(110deg,#f1f2ff,#fff);border-bottom:1px solid #e9eaf7}
-.registry-profile-init-icon{display:grid;place-items:center;flex:0 0 46px;height:46px;border-radius:13px;background:#e4e7ff;color:#333a9f}
-.registry-profile-init-fields{display:flex;flex-direction:column;gap:18px;padding:26px 24px 30px}
-.registry-profile-init-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.registry-profile-init-footer{padding:14px 24px;gap:10px}
-@media(max-width:600px){.registry-profile-init-dialog{width:100vw;max-width:100vw;border-radius:0}.registry-profile-init-grid{grid-template-columns:1fr}.registry-profile-init-fields{padding:18px 16px;gap:14px}.registry-profile-init-header{padding:16px}}
+/* System Profile registration dialog – redesigned presentation only. */
+.registry-profile-init-dialog{width:min(860px,95vw);max-width:860px;border-radius:20px;overflow:hidden;background:#f7f9fd;color:#192d56}
+.registry-profile-init-header{display:flex;align-items:center;gap:16px;padding:24px 28px;background:linear-gradient(115deg,#092c73 0%,#0038a8 68%,#285fbe 100%);color:white}
+.registry-profile-init-icon{display:grid;place-items:center;flex:0 0 52px;height:52px;border-radius:15px;background:rgba(255,255,255,.15);color:white;border:1px solid rgba(255,255,255,.21)}
+.registry-profile-init-heading{min-width:0;flex:1}
+.registry-profile-init-eyebrow{font-size:10px;font-weight:800;letter-spacing:.15em;color:#c5d8ff;margin-bottom:5px}
+.registry-profile-init-heading h2{font-size:21px;font-weight:800;line-height:1.25;margin:0;color:white}
+.registry-profile-init-heading p{margin:6px 0 0;font-size:12px;color:#deebff;line-height:1.45}
+.registry-profile-init-close{color:white;align-self:flex-start;margin:-5px -8px 0 0}
+.registry-profile-init-fields{display:flex;flex-direction:column;gap:16px;padding:20px 24px 24px;max-height:calc(90vh - 177px);overflow-y:auto}
+.registry-profile-init-panel{background:#fff;border:1px solid #e0e8f4;border-radius:15px;padding:22px 22px 24px;box-shadow:0 4px 16px rgba(18,49,105,.035)}
+.registry-profile-init-section-heading{display:flex;align-items:center;gap:12px;margin-bottom:19px}
+.registry-profile-init-section-heading h3{font-size:15px;line-height:1.35;margin:0;font-weight:800;color:#142f69}
+.registry-profile-init-section-heading p{font-size:12px;line-height:1.4;margin:3px 0 0;color:#687b9c}
+.registry-profile-init-required-hint{font-size:11px;color:#7b89a5;margin-left:auto;white-space:nowrap;align-self:flex-start}
+.registry-profile-init-inputs{display:flex;flex-direction:column;gap:14px}
+.registry-profile-init-inputs :deep(.q-field--outlined .q-field__control){border-radius:9px}
+.registry-profile-init-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.registry-profile-init-description :deep(textarea){min-height:50px!important}
+.registry-profile-init-panel--architecture{padding-bottom:22px}
+.registry-profile-init-solution-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.registry-profile-init-solution{appearance:none;position:relative;min-height:100px;min-width:0;border:1.5px solid #dbe5f4;border-radius:12px;background:#fbfcff;color:#2b477c;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:10px;padding:14px 12px;cursor:pointer;text-align:left;transition:background .18s,border-color .18s,box-shadow .18s,transform .18s;font:inherit}
+.registry-profile-init-solution:hover{border-color:#82a6eb;background:#f3f7ff;transform:translateY(-1px)}
+.registry-profile-init-solution:focus-visible{outline:3px solid #93b9fb;outline-offset:2px}
+.registry-profile-init-solution.is-selected{background:#edf4ff;border-color:#0038a8;box-shadow:0 0 0 1px #0038a8 inset}
+.registry-profile-init-solution-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:#edf2fb;color:#315896}
+.registry-profile-init-solution.is-selected .registry-profile-init-solution-icon{background:#0038a8;color:#fff}
+.registry-profile-init-solution-name{font-size:11px;line-height:1.35;letter-spacing:.025em;font-weight:800;overflow-wrap:anywhere}
+.registry-profile-init-footer{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 24px;background:white}
+.registry-profile-init-footer-note{display:flex;align-items:center;gap:7px;color:#71809b;font-size:11px;line-height:1.4;max-width:330px}
+.registry-profile-init-footer-actions{display:flex;gap:8px;align-items:center;margin-left:auto}
+.registry-profile-init-submit{border-radius:9px;padding:0 14px;min-height:41px;background:#0038a8!important;font-weight:700}
+@media(max-width:760px){.registry-profile-init-solution-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.registry-profile-init-footer-note{display:none}}
+@media(max-width:600px){.registry-profile-init-dialog{width:100vw;max-width:100vw;border-radius:0}.registry-profile-init-grid{grid-template-columns:1fr}.registry-profile-init-fields{padding:14px;gap:12px}.registry-profile-init-header{padding:17px}.registry-profile-init-panel{padding:16px}.registry-profile-init-solution-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.registry-profile-init-solution{min-height:82px}.registry-profile-init-footer{padding:12px 16px}.registry-profile-init-heading h2{font-size:17px}.registry-profile-init-icon{height:43px;flex-basis:43px}}
 </style>
 
 <style scoped lang="scss">
@@ -2216,4 +2834,232 @@ onMounted(() => {
 .registry-stakeholders-layout .registry-assign-type { flex: 1 1 185px; }
 .registry-assigned-unclassified { margin-top: 16px; padding: 16px; border: 1px dashed #cfd9ee; border-radius: 14px; background: #f8faff; }
 @media (max-width: 980px) { .registry-stakeholders-layout .registry-stakeholders-grid { grid-template-columns: 1fr; } }
+</style>
+
+<style scoped lang="scss">
+/* Repository tab: Library-driven solution buttons, scoped repository cards. */
+.registry-repository-section{background:#fff;border:1px solid #dce5f6;border-radius:15px;padding:20px;min-width:0}
+.registry-repository-section__header{display:flex;align-items:center;gap:12px;color:#0038a8;margin-bottom:17px}
+.registry-repository-section__header h3{font-size:16px;line-height:1.3;font-weight:800;color:#143269;margin:0}
+.registry-repository-section__header p{font-size:12px;line-height:1.4;color:#6b7da0;margin:4px 0 0}
+.registry-repository-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:10px}
+.registry-repository-option{appearance:none;border:1px solid #dce5f5;border-radius:11px;background:#f8faff;color:#294677;display:flex;align-items:center;justify-content:center;gap:9px;padding:13px 10px;cursor:pointer;font:inherit;font-size:12px;font-weight:750;min-height:54px;transition:background .15s,border-color .15s}
+.registry-repository-option:hover{background:#eef4ff;border-color:#8aaee8}
+.registry-repository-option.is-selected{background:#eaf2ff;border:2px solid #0038a8;color:#0038a8;padding:12px 9px}
+.registry-repository-option:focus-visible{outline:3px solid #96b7f4;outline-offset:2px}
+.registry-repository-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.registry-repository-fields{display:grid;grid-template-columns:1fr;gap:16px}
+.registry-repository-fields>.q-field{min-width:0;width:100%}
+@media(max-width:780px){.registry-repository-pair{grid-template-columns:1fr}.registry-repository-section{padding:16px}}
+</style>
+
+<style scoped>
+/* Technology Used step: presentation only; model bindings remain unchanged. */
+.registry-technology { display: flex; flex-direction: column; gap: 20px; }
+.registry-technology__intro { display: flex; align-items: center; gap: 13px; padding: 4px 0 2px; }
+.registry-technology__intro-icon { display: grid; place-items: center; flex: none; width: 48px; height: 48px; border-radius: 14px; background: #e7efff; color: #0038a8; }
+.registry-technology__intro h3 { margin: 0; color: #102f6a; font-size: 17px; font-weight: 800; line-height: 1.35; }
+.registry-technology__intro p { margin: 4px 0 0; font-size: 12px; color: #6b7e9d; line-height: 1.5; }
+.registry-technology__stack-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.registry-technology__card { min-width: 0; padding: 22px; border: 1px solid #dae5f6; border-radius: 17px; background: #fff; box-shadow: 0 5px 20px rgba(16, 50, 109, .04); }
+.registry-technology__card-header { display: flex; align-items: center; gap: 12px; padding-bottom: 17px; margin-bottom: 20px; border-bottom: 1px solid #edf1f8; }
+.registry-technology__card-icon { flex: none; display: grid; place-items: center; width: 43px; height: 43px; border-radius: 12px; }
+.registry-technology__card-icon--frontend { background: #e7efff; color: #0038a8; }
+.registry-technology__card-icon--backend { background: #e7f4f7; color: #14647c; }
+.registry-technology__card-icon--infra { background: #eef0ff; color: #3b4ba0; }
+.registry-technology__card-header h4 { margin: 0; color: #17356c; font-size: 15px; font-weight: 800; line-height: 1.4; }
+.registry-technology__card-header p { margin: 3px 0 0; color: #7383a0; font-size: 11px; line-height: 1.5; }
+.registry-technology__field { width: 100%; min-width: 0; }
+.registry-technology :deep(.registry-technology__field.q-field--outlined .q-field__control) { min-height: 56px; border-radius: 10px; background: #fff; }
+.registry-technology :deep(.registry-technology__field .q-field__prepend) { color: #6480b2; }
+.registry-technology__helper { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 11px; color: #7182a2; }
+.registry-technology__infra-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.registry-technology__server-name { grid-column: 1 / -1; }
+@media (max-width: 850px) {
+  .registry-technology__stack-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .registry-technology__card { padding: 16px; }
+  .registry-technology__infra-grid { grid-template-columns: 1fr; }
+  .registry-technology__server-name { grid-column: auto; }
+  .registry-technology__intro { align-items: flex-start; }
+}
+</style>
+
+<style scoped>
+/* Scrum planning preview — visually separate from the Registry wizard */
+.scrum-planner { display:flex; flex-direction:column; width:100%; height:100%; min-height:0; background:#f5f7fc; color:#243454; font-family:inherit; }
+.scrum-planner__header { display:flex; align-items:center; justify-content:space-between; gap:20px; flex-shrink:0; padding:19px 28px; background:linear-gradient(112deg,#10296e 0%,#214ca1 67%,#316bc7 100%); color:#fff; }
+.scrum-planner__identity,.scrum-planner__header-actions { display:flex; align-items:center; gap:16px; }
+.scrum-planner__mark { display:flex; align-items:center; justify-content:center; width:50px; height:50px; border-radius:14px; background:rgba(255,255,255,.13); border:1px solid rgba(255,255,255,.21); }
+.scrum-planner__eyebrow { font-size:10px; font-weight:800; letter-spacing:1.5px; color:#b9d3ff; }
+.scrum-planner__eyebrow span { padding:0 7px; opacity:.6; }
+.scrum-planner__identity h2 { font-size:22px; font-weight:800; line-height:1.25; margin:4px 0 2px; }
+.scrum-planner__identity p { margin:0; font-size:12px; color:#d4e2ff; }
+.scrum-planner__preview-badge { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.23); color:#fff; font-weight:700; font-size:10px; padding:7px 10px; letter-spacing:.5px; }
+.scrum-planner__overview { padding:18px 28px; display:grid; grid-template-columns:minmax(240px,2fr) repeat(4,minmax(105px,1fr)); gap:12px; flex-shrink:0; }
+.scrum-planner__project,.scrum-planner__metric { min-height:78px; display:flex; align-items:center; gap:12px; border-radius:13px; border:1px solid #e0e6f1; background:#fff; padding:14px 16px; box-shadow:0 2px 8px rgba(25,44,92,.025); }
+.scrum-planner__project-icon { display:grid; place-items:center; width:43px; height:43px; background:#e9efff; color:#17499a; border-radius:11px; }
+.scrum-planner__project div:last-child,.scrum-planner__metric div { display:flex; flex-direction:column; min-width:0; }
+.scrum-planner__project small,.scrum-planner__sprint-summary span { color:#8693ad; letter-spacing:1px; font-size:9px; font-weight:800; }
+.scrum-planner__project strong { font-weight:800; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.scrum-planner__project div:last-child>span { color:#7483a1; font-size:11px; }
+.scrum-planner__metric>.q-icon { color:#2c65b6; font-size:22px; }
+.scrum-planner__metric strong { font-size:22px; font-weight:850; line-height:1.2; }
+.scrum-planner__metric span { color:#7a879e; font-size:11px; white-space:nowrap; }
+.scrum-planner__notice { margin:0 28px 16px; border:1px solid #d8e4f8; background:#eef4ff; color:#345487; padding:11px 14px; border-radius:10px; display:flex; align-items:flex-start; gap:10px; font-size:12px; line-height:1.55; flex-shrink:0; }
+.scrum-planner__notice .q-icon { flex-shrink:0; margin-top:1px; }
+.scrum-planner__workspace { display:grid; grid-template-columns:minmax(0,1.04fr) minmax(0,.96fr); gap:18px; padding:0 28px 18px; flex:1; min-height:0; }
+.scrum-planner__column { display:flex; flex-direction:column; min-height:0; background:#fff; border:1px solid #dfe6f2; border-radius:16px; overflow:hidden; box-shadow:0 5px 17px rgba(30,52,98,.035); }
+.scrum-planner__column-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 20px 15px; flex-shrink:0; }
+.scrum-planner__column-title { display:flex; gap:11px; align-items:center; }
+.scrum-planner__column-title h3 { margin:0; font-size:15px; font-weight:800; }
+.scrum-planner__column-title p { margin:3px 0 0; font-size:11px; color:#8a95a9; }
+.scrum-planner__column-icon { display:grid; place-items:center; width:40px; height:40px; border-radius:11px; }
+.scrum-planner__column-icon--ai { background:#f0ecff; color:#7356bc; }
+.scrum-planner__column-icon--sprint { background:#e6f1ff; color:#215db0; }
+.scrum-planner__count { background:#edf1f9; color:#4b5d7d; border-radius:20px; font-weight:750; padding:7px 10px; }
+.scrum-planner__view-tabs { display:flex; gap:16px; padding:0 20px 12px; border-bottom:1px solid #edf0f6; flex-shrink:0; flex-wrap:wrap; }
+.scrum-planner__view-tab { display:inline-flex; align-items:center; gap:7px; background:transparent; border:0; border-bottom:2px solid transparent; padding:8px 0; font:inherit; font-size:12px; font-weight:700; color:#718099; cursor:pointer; }
+.scrum-planner__view-tab.is-selected { color:#234ea2; border-bottom-color:#234ea2; }
+.scrum-planner__connection-panel { padding:12px 20px 14px; border-bottom:1px solid #edf0f6; flex-shrink:0; max-height:265px; overflow-y:auto; }
+.scrum-planner__connection-label { display:flex; gap:6px; align-items:center; font-size:11px; font-weight:800; color:#495b76; margin-bottom:7px; }
+.scrum-planner__connection-tabs { display:flex; align-items:center; gap:6px; overflow-x:auto; padding-bottom:7px; }
+.scrum-planner__connection-count { display:inline-block; margin-left:4px; font-size:10px; opacity:.75; }
+.scrum-planner__connection-story,.scrum-planner__connection-criterion { font-size:11px; line-height:1.5; color:#536680; margin:2px 0 10px; }
+.scrum-planner__connection-caption { font-size:10px; color:#8290a5; margin-top:5px; }
+.scrum-planner__filters { display:flex; gap:6px; align-items:center; overflow-x:auto; padding:0 20px 14px; flex-shrink:0; }
+.scrum-planner__filter,.scrum-planner__sprint-tab { font-family:inherit; cursor:pointer; border:1px solid #e0e5ef; border-radius:8px; padding:7px 11px; font-size:11px; font-weight:750; background:#fff; color:#667590; white-space:nowrap; transition:background .2s,color .2s; }
+.scrum-planner__filter.is-selected { color:#fff; background:#234ea2; border-color:#234ea2; }
+.scrum-planner__task-list { background:#f9fbfe; border-top:1px solid #eef0f6; flex:1; overflow-y:auto; min-height:0; padding:14px; display:flex; flex-direction:column; gap:10px; }
+.scrum-planner__task { padding:14px 15px 12px; border:1px solid #e1e7f1; border-radius:12px; background:#fff; cursor:grab; box-shadow:0 2px 8px rgba(34,51,86,.025); }
+.scrum-planner__task.is-dragging { opacity:.5; }
+.scrum-planner__task-meta { display:flex; align-items:center; gap:8px; }
+.scrum-planner__drag-handle { margin-left:auto; color:#aeb8cc; cursor:grab; font-size:19px; }
+.scrum-planner__task h4,.scrum-planner__planned-task h4 { font-size:13px; margin:8px 0 5px; line-height:1.4; font-weight:800; }
+.scrum-planner__task p { margin:0 0 12px; color:#79879a; font-size:11px; line-height:1.5; }
+.scrum-planner__task-bottom,.scrum-planner__planned-bottom { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.scrum-planner__tags { display:flex; gap:6px; }
+.scrum-planner__tags span { display:flex; align-items:center; gap:3px; background:#f2f5fa; border-radius:5px; padding:5px 7px; color:#6f7f99; font-size:10px; font-weight:700; }
+.scrum-planner__review-state { border-radius:20px; background:#fff5e3; color:#a9711c; font-size:10px; padding:5px 9px; font-weight:750; white-space:nowrap; }
+.scrum-planner__review-state.is-approved { background:#e7f7ed; color:#18844c; }
+.scrum-planner__review-state.is-revision { background:#ffedeb; color:#b45445; }
+.scrum-planner__review-actions,.scrum-planner__planned-actions { display:flex; justify-content:flex-end; gap:4px; flex-wrap:wrap; padding-top:10px; margin-top:10px; border-top:1px solid #eef1f6; }
+.scrum-planner__review-actions .q-btn,.scrum-planner__planned-actions .q-btn { font-size:11px; }
+.scrum-planner__sprint-tabs { display:flex; gap:7px; border-bottom:1px solid #e9eef6; padding:0 20px 13px; overflow-x:auto; flex-shrink:0; }
+.scrum-planner__sprint-tab { border-color:transparent; background:#f4f6fb; }
+.scrum-planner__sprint-tab.is-selected { background:#e7efff; color:#1a4ca1; border-color:#bdd1fb; }
+.scrum-planner__sprint-tab span { display:inline-block; font-size:10px; margin-left:6px; background:#fff; border-radius:6px; padding:2px 5px; }
+.scrum-planner__sprint-summary { display:flex; align-items:center; justify-content:space-between; gap:10px; background:#f8faff; padding:12px 20px; flex-shrink:0; }
+.scrum-planner__sprint-summary div { display:flex; flex-direction:column; gap:3px; }
+.scrum-planner__sprint-summary strong { font-size:13px; color:#28426e; }
+.scrum-planner__dropzone { margin:14px; border:2px dashed #ccdaee; border-radius:13px; padding:12px; flex:1; min-height:190px; background:#fafdff; overflow:auto; display:flex; flex-direction:column; gap:11px; }
+.scrum-planner__dropzone.is-over { border-color:#3975cd; background:#f0f5ff; }
+.scrum-planner__drop-hint { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; text-align:center; margin:auto; padding:28px 15px; }
+.scrum-planner__drop-icon { background:#eaf0fb; color:#6789c3; display:grid; place-items:center; width:69px; height:69px; border-radius:50%; }
+.scrum-planner__drop-hint strong { font-size:15px; }
+.scrum-planner__drop-hint p { margin:0; max-width:270px; font-size:12px; line-height:1.6; color:#79879d; }
+.scrum-planner__drop-hint>span:last-child { color:#8996ad; font-size:11px; }
+.scrum-planner__planned-task { border:1px solid #dce6f5; background:#fff; border-radius:10px; padding:13px; cursor:grab; box-shadow:0 2px 6px rgba(27,53,99,.04); }
+.scrum-planner__planned-bottom { color:#8390a5; font-size:11px; }
+.scrum-planner__sprint-footer { padding:12px 20px; border-top:1px solid #ecf0f6; display:flex; align-items:center; gap:9px; color:#7c8ba1; font-size:11px; flex-shrink:0; }
+.scrum-planner__sprint-footer .q-icon { color:#3568b5; }
+.scrum-planner__empty { display:flex; flex-direction:column; align-items:center; gap:6px; padding:40px 20px; text-align:center; color:#8996aa; }
+.scrum-planner__empty strong { color:#5f7292; }
+.scrum-planner__empty span { font-size:11px; }
+.scrum-planner__footer { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; padding:13px 28px; border-top:1px solid #e3e8f2; background:#fff; }
+.scrum-planner__footer>span { color:#94a1b4; font-size:11px; display:flex; align-items:center; gap:7px; }
+.scrum-planner__footer>div { display:flex; gap:8px; }
+@media (max-width:1100px) { .scrum-planner__overview { grid-template-columns:repeat(4,minmax(0,1fr)); }.scrum-planner__project { grid-column:span 4; }.scrum-planner__workspace { gap:12px; }.scrum-planner__header { padding:18px; }.scrum-planner__workspace { padding:0 18px 14px; }.scrum-planner__overview { padding:14px 18px; }.scrum-planner__notice { margin:0 18px 12px; } }
+@media (max-width:750px) { .scrum-planner__header-actions .scrum-planner__preview-badge { display:none; }.scrum-planner__identity h2 { font-size:18px; }.scrum-planner__identity p { font-size:11px; }.scrum-planner__workspace { grid-template-columns:1fr; overflow:auto; }.scrum-planner__column { min-height:425px; }.scrum-planner__overview { grid-template-columns:repeat(2,minmax(0,1fr)); }.scrum-planner__project { grid-column:span 2; }.scrum-planner__footer { padding:12px 18px; }.scrum-planner__footer>span { display:none; } }
+</style>
+
+<style scoped>
+.registry-execution-confirm { width:min(690px,calc(100vw - 32px)); max-width:690px; border-radius:18px; overflow:hidden; }
+.registry-execution-confirm__header { display:flex; align-items:center; gap:15px; padding:22px 24px; color:white; background:linear-gradient(115deg,#102c75 0%,#2357b0 100%); }
+.registry-execution-confirm__icon { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.18); display:grid; place-items:center; width:52px; height:52px; flex:none; border-radius:13px; }
+.registry-execution-confirm__heading { min-width:0; flex:1; }
+.registry-execution-confirm__heading h2 { font-size:21px; line-height:1.3; font-weight:800; margin:4px 0; }
+.registry-execution-confirm__heading p { margin:0; color:#dce8ff; font-size:12px; }
+.registry-execution-confirm__eyebrow { font-size:10px; letter-spacing:1.4px; font-weight:800; color:#c9dcff; }
+.registry-execution-confirm__body { padding:23px 24px 12px; }
+.registry-execution-confirm__intro { display:flex; align-items:flex-start; gap:10px; background:#eef4ff; border:1px solid #d8e5fb; color:#294c80; padding:13px; border-radius:11px; }
+.registry-execution-confirm__intro .q-icon { flex:none; margin-top:2px; }
+.registry-execution-confirm__intro p { margin:0; font-size:12px; line-height:1.65; }
+.registry-execution-confirm__section-title { margin:20px 0 11px; font-weight:800; font-size:13px; color:#263c65; }
+.registry-execution-confirm__docs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.registry-execution-confirm__doc { display:flex; align-items:center; gap:10px; background:#fff; border:1px solid #e0e7f2; border-radius:11px; padding:13px; min-width:0; }
+.registry-execution-confirm__doc-icon { width:37px; height:37px; flex:none; border-radius:10px; background:#eaf0ff; color:#2959a8; display:grid; place-items:center; }
+.registry-execution-confirm__doc>div:nth-child(2) { min-width:0; display:flex; flex-direction:column; gap:3px; }
+.registry-execution-confirm__doc strong { font-size:11px; line-height:1.4; color:#283957; }
+.registry-execution-confirm__doc span { color:#7a8ba7; font-size:10px; font-weight:700; }
+.registry-execution-confirm__doc-mark { flex:none; color:#a9b9d2; margin-left:auto; }
+.registry-execution-confirm__preview-note { display:flex; gap:9px; align-items:flex-start; padding:11px 12px; background:#fff8e8; border:1px solid #f1e2b9; color:#7a5c21; border-radius:9px; margin-top:15px; font-size:11px; line-height:1.6; }
+.registry-execution-confirm__preview-note .q-icon { flex:none; }
+.registry-execution-confirm__checkbox { margin:12px 0 3px; color:#344663; font-size:12px; align-items:flex-start; }
+.registry-execution-confirm__footer { padding:13px 24px; gap:8px; }
+@media (max-width:560px) { .registry-execution-confirm__header { padding:17px; } .registry-execution-confirm__body { padding:17px 17px 10px; } .registry-execution-confirm__docs { grid-template-columns:1fr; } .registry-execution-confirm__footer { padding:12px 17px; } .registry-execution-confirm__heading h2 { font-size:18px; } }
+</style>
+
+<style scoped>
+/* ONE ICTMS task discipline and hierarchy details */
+.scrum-planner__category { border-radius:5px; padding:4px 7px; background:#e8f3ff; color:#205b9b; font-size:10px; font-weight:800; }
+.scrum-planner__category--backend { background:#e9f8f0; color:#137c52; }
+.scrum-planner__category--db { background:#fff0dc; color:#9b6015; }
+.scrum-planner__category--ui-ux { background:#f3eaff; color:#7847a3; }
+.scrum-planner__trace { margin:10px 0 12px; display:grid; gap:7px; }
+.scrum-planner__trace > div { display:grid; grid-template-columns:115px minmax(0,1fr); gap:9px; font-size:11px; line-height:1.5; }
+.scrum-planner__trace b { color:#4f6590; }
+.scrum-planner__trace span,.scrum-planner__planned-context { color:#697c95; overflow-wrap:anywhere; }
+.scrum-planner__planned-context { font-size:11px; line-height:1.5; margin-bottom:7px; }
+@media (max-width:550px) { .scrum-planner__trace > div { grid-template-columns:1fr; gap:1px; } }
+</style>
+
+<style scoped>
+.scrum-planner__generated-heading { display:flex; align-items:center; gap:7px; color:#465b7b; font-size:11px; font-weight:700; }
+.scrum-planner__assignment-state { display:flex; align-items:center; gap:5px; margin:4px 0 9px; color:#66758d; font-size:11px; }
+.scrum-planner__module-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.scrum-planner__module-heading { border: 1px solid #e3e8f1; border-radius: 10px; padding: 12px 14px; background: #fff; display: flex; flex-direction: column; gap: 9px; }
+.scrum-planner__module-criterion { display: flex; align-items: flex-start; gap: 7px; font-size: 11px; font-weight: 700; color: #455570; line-height: 1.5; }
+.scrum-planner__module-criterion span { font-weight: 400; color: #596984; }
+.scrum-planner__module-title { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #293b57; }
+.scrum-planner__module-title span { margin-left: auto; color: #77849a; font-size: 11px; }
+</style>
+
+<style scoped>
+.scrum-planner__trace-accordion { padding: 8px 12px; }
+.scrum-planner__criterion-item { border: 1px solid #dbe2f0; border-radius: 10px; margin-bottom: 10px; background: #fff; overflow: hidden; }
+.scrum-planner__criterion-body { padding: 8px 12px 16px; }
+.scrum-planner__criterion-body .scrum-planner__module-group { margin-bottom: 16px; }
+.scrum-planner__criterion-body .scrum-planner__task { margin-top: 10px; }
+</style>
+
+<style scoped>
+/* Compact, always-visible generated tasks under each acceptance criterion. */
+.scrum-planner__trace-task-row { border: 1px solid #dce4f1; border-radius: 9px; background: #fff; overflow: hidden; cursor: grab; }
+.scrum-planner__trace-task-row + .scrum-planner__trace-task-row { margin-top: 6px; }
+.scrum-planner__trace-task-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; }
+.scrum-planner__trace-task-code { font-size: 11px; font-weight: 800; color: #234ea2; border: 1px solid #d6e2f5; background: #eef4ff; padding: 3px 7px; border-radius: 5px; white-space: nowrap; }
+.scrum-planner__trace-task-name { font-size: 12px; font-weight: 750; color: #263853; overflow-wrap: anywhere; }
+.scrum-planner__trace-task-subtitle { display: flex; gap: 6px; margin-top: 3px; font-size: 10px; color: #73829a; }
+.scrum-planner__trace-task-details { padding: 5px 13px 13px; border-top: 1px solid #eef1f6; }
+.scrum-planner__trace-task-expand :deep(.q-item) { min-height: 44px; padding: 7px 10px; }
+.scrum-planner__trace-task-expand :deep(.q-item__section--side) { padding-left: 6px; }
+.scrum-planner__criterion-body .scrum-planner__module-group { gap: 5px; }
+.scrum-planner__criterion-body .scrum-planner__module-heading { gap: 4px; padding: 9px 11px; }
+</style>
+
+<style scoped>
+
+/* Stable visible task rows; no nested expansion-item layout or clipped badges. */
+.scrum-planner__trace-accordion > .scrum-planner__criterion-item { flex-shrink: 0; }
+.scrum-planner__criterion-body .scrum-planner__module-group { min-width: 0; flex-shrink: 0; gap: 6px; margin-bottom: 10px; }
+.scrum-planner__criterion-body .scrum-planner__module-heading { padding: 9px 11px; gap: 4px; }
+.scrum-planner__trace-task-row { display: block; flex: none; min-width: 0; overflow: visible; padding: 8px 10px; }
+.scrum-planner__trace-task-toggle { display: flex; width: 100%; min-width: 0; align-items: center; flex-wrap: wrap; gap: 7px; padding: 0; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.scrum-planner__trace-task-toggle:focus-visible { outline: 2px solid #234ea2; outline-offset: 3px; border-radius: 4px; }
+.scrum-planner__trace-task-name { flex: 1 1 160px; min-width: 0; }
+.scrum-planner__trace-task-chevron { color: #73829a; margin-left: auto; flex-shrink: 0; }
+.scrum-planner__trace-task-subtitle { margin: 4px 0 0; }
+.scrum-planner__trace-task-details { margin-top: 9px; padding: 9px 2px 2px; }
 </style>
