@@ -645,7 +645,7 @@
           <div class="registry-execution-confirm__heading">
             <span class="registry-execution-confirm__eyebrow">ONE ICTMS · PROJECT EXECUTION</span>
             <h2>Confirm AI Task Generation</h2>
-            <p>Review and acknowledge the next step before entering Scrum Planning.</p>
+            <p>Review and acknowledge the next step before checking generated tasks.</p>
           </div>
           <q-btn flat round dense icon="close" color="white" aria-label="Cancel execution" @click="cancelScrumExecution" />
         </header>
@@ -664,7 +664,7 @@
           </div>
           <div class="registry-execution-confirm__preview-note">
             <q-icon name="science" size="19px" />
-            <span><strong>Frontend preview:</strong> The next screen currently uses sample tasks. No AI request is sent, and no tasks or sprint plans are saved.</span>
+            <span><strong>Frontend preview:</strong> The next screen lets you review and edit sample tasks before Scrum Planning. No AI request is sent, and no tasks or sprint plans are saved.</span>
           </div>
           <q-checkbox v-model="scrumExecutionAcknowledged" color="indigo-9" class="registry-execution-confirm__checkbox"
             label="I understand that suggested tasks require Project Manager or Scrum Master review before sprint planning." />
@@ -675,6 +675,521 @@
           <q-btn unelevated no-caps color="indigo-9" icon-right="arrow_forward" label="Acknowledge & Continue"
             :disable="!scrumExecutionAcknowledged" @click="confirmScrumExecution" />
         </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- Task quality gate: PM/Scrum Master checks and edits suggested tasks before sprint planning. -->
+    <q-dialog v-model="scrumTaskReviewOpen" persistent maximized transition-show="slide-up" transition-hide="slide-down">
+      <q-card class="scrum-review-page">
+        <header class="scrum-review-page__header">
+          <div>
+            <h2>Review & Edit Tasks</h2>
+            <p>Verify requirements, correct suggested work, and approve each task before Scrum Planning.</p>
+          </div>
+          <q-btn flat round icon="close" color="white" aria-label="Close task review" @click="scrumTaskReviewOpen = false" />
+        </header>
+        <div class="scrum-review-page__summary">
+          <span><q-icon name="assignment" size="18px" /><b>{{ scrumTasks.length }}</b> total tasks</span>
+          <span><q-icon name="task_alt" size="18px" color="positive" /><b>{{ approvedScrumTasks }}</b> approved</span>
+          <span><q-icon name="pending_actions" size="18px" /><b>{{ pendingScrumTasks }}</b> awaiting review</span>
+          <span><q-icon name="rate_review" size="18px" /><b>{{ revisionScrumTasks }}</b> needs revision</span>
+          <div class="scrum-review-page__progress" aria-label="Task approval progress">
+            <div class="scrum-review-page__progress-caption"><strong>Review progress</strong><span>{{ scrumTasks.length ? Math.round((approvedScrumTasks / scrumTasks.length) * 100) : 0 }}% approved</span></div>
+            <q-linear-progress rounded size="7px" color="positive" track-color="grey-3" :value="scrumTasks.length ? approvedScrumTasks / scrumTasks.length : 0" />
+          </div>
+        </div>
+        <div class="scrum-review-page__toolbar">
+          <q-input v-model="scrumReviewSearch" dense outlined clearable debounce="150" placeholder="Find task code, title, module or story" class="scrum-review-page__search">
+            <template #prepend><q-icon name="search" /></template>
+          </q-input>
+          <q-select v-if="scrumReviewTab === 'stories'" v-model="scrumReviewCategoryFilter" dense outlined emit-value map-options :options="scrumCategoryFilters.map(item => ({ label: item, value: item }))" label="Category" style="min-width:170px" />
+          <q-select v-model="scrumReviewStatusFilter" dense outlined emit-value map-options :options="scrumReviewStatusOptions" label="Review status" class="scrum-review-page__status-select" />
+          <q-btn v-if="scrumReviewSearch || scrumReviewStatusFilter !== 'All Statuses' || scrumReviewCategoryFilter !== 'All Categories'"
+            flat dense no-caps icon="filter_alt_off" label="Clear filters" color="indigo-9"
+            @click="clearScrumReviewFilters" />
+        </div>
+        <q-tabs v-model="scrumReviewTab" dense align="left" active-color="indigo-9" indicator-color="indigo-9" class="scrum-review-page__main-tabs text-grey-8" no-caps>
+          <q-tab name="stories" icon="menu_book" label="User Stories / Acceptance Criteria" />
+          <q-tab name="modules" icon="layers" label="Modules / Generated Tasks" />
+        </q-tabs>
+        <q-separator />
+        <div class="scrum-review-page__creation-toolbar row items-center justify-between q-px-md q-py-sm">
+          <span class="text-caption text-grey-7">{{ scrumReviewTab === 'stories' ? 'User Stories → Acceptance Criteria' : 'Modules → Generated Tasks' }}</span>
+          <q-btn v-if="scrumReviewTab === 'stories'" color="indigo-9" no-caps unelevated icon="add" label="Add User Story" @click="openScrumStoryCreator" />
+          <q-btn v-else color="indigo-9" no-caps unelevated icon="add" label="Add Module" @click="openScrumModuleCreator" />
+        </div>
+        <div class="scrum-review-page__body">
+          <template v-if="scrumReviewTab === 'stories'">
+            <q-expansion-item v-for="story in scrumReviewStories" :key="story" group="review-stories"
+              class="scrum-review-page__story q-mb-md" header-class="text-weight-bold" expand-separator>
+              <template #header>
+                <q-item-section avatar><q-icon name="menu_book" color="indigo-8" /></q-item-section>
+                <q-item-section>{{ story }}</q-item-section>
+                <q-item-section side><q-btn flat dense round icon="edit" color="indigo-9" aria-label="Edit user story" @click.stop="openScrumRequirementEditor('story', story)"><q-tooltip>Edit User Story</q-tooltip></q-btn></q-item-section>
+              </template>
+              <q-card-section class="q-pt-sm">
+                <div v-if="scrumReviewCriteria(story).length === 0" class="text-caption text-grey-7 q-mb-sm">No acceptance criteria available.</div>
+                <div class="text-caption text-grey-7 q-mb-md">Acceptance criteria for this user story. Editing a requirement resets its linked tasks to Pending Review.</div>
+                <div v-for="criterion in scrumReviewCriteria(story)" :key="criterion" class="scrum-review-page__criterion q-mb-sm">
+                  <div class="row items-center no-wrap q-gutter-sm">
+                    <q-icon name="fact_check" color="indigo-8" size="20px" />
+                    <span class="col">{{ criterion }}</span>
+                    <q-badge color="grey-2" text-color="grey-9">{{ scrumReviewTasksFor(story, criterion).length }} tasks</q-badge>
+                    <q-btn flat dense round icon="visibility" color="indigo-9" aria-label="View acceptance criterion" @click="viewScrumCriterion(story, criterion)"><q-tooltip>View Criterion</q-tooltip></q-btn>
+                    <q-btn flat dense round icon="edit" color="indigo-9" aria-label="Edit acceptance criterion" @click="openScrumRequirementEditor('criterion', criterion, story)"><q-tooltip>Edit Criterion</q-tooltip></q-btn>
+                    <q-btn flat dense round icon="delete_outline" color="negative" aria-label="Remove acceptance criterion" @click="confirmRemoveScrumCriterion(story, criterion)"><q-tooltip>Remove Criterion</q-tooltip></q-btn>
+                    <q-btn flat dense round :icon="scrumCriterionTasksHidden(story, criterion) ? 'expand_more' : 'expand_less'" color="indigo-9"
+                      :aria-label="`${scrumCriterionTasksHidden(story, criterion) ? 'Show' : 'Hide'} tasks for this acceptance criterion`"
+                      @click="toggleScrumCriterionTasks(story, criterion)">
+                      <q-tooltip>{{ scrumCriterionTasksHidden(story, criterion) ? 'Show Tasks' : 'Hide Tasks' }}</q-tooltip>
+                    </q-btn>
+                  </div>
+                  <div v-if="scrumReviewTasksFor(story, criterion).length && !scrumCriterionTasksHidden(story, criterion)" class="scrum-review-page__linked-tasks">
+                    <div v-for="task in scrumReviewTasksFor(story, criterion)" :key="task.id" class="scrum-review-page__linked-task">
+                      <span class="scrum-planner__trace-task-code">{{ task.id }}</span>
+                      <span class="col"><strong>{{ task.title }}</strong><small>{{ task.module }} · {{ task.category }}</small></span>
+                      <span class="scrum-planner__review-state" :class="`is-${task.review}`">{{ scrumReviewLabel(task.review) }}</span>
+                      <q-btn flat dense round icon="visibility" color="indigo-9" :aria-label="`View task ${task.id}`" @click="scrumPreviewOrigin = 'review'; viewScrumGeneratedTask(task)"><q-tooltip>View Task</q-tooltip></q-btn>
+                      <q-btn flat dense round icon="edit" color="indigo-9" :aria-label="`Edit task ${task.id}`" @click="editScrumGeneratedTask(task)"><q-tooltip>Edit Task</q-tooltip></q-btn>
+                      <q-btn flat dense round icon="delete_outline" color="negative" :aria-label="`Remove task ${task.id}`" @click="confirmRemoveScrumTask(task)"><q-tooltip>Remove Task</q-tooltip></q-btn>
+                      <q-btn v-if="task.review !== 'approved'" flat dense round icon="check_circle_outline" color="positive"
+                        :aria-label="`Approve task ${task.id}`" @click="setScrumReview(task, 'approved')"><q-tooltip>Approve Task</q-tooltip></q-btn>
+                    </div>
+                  </div>
+                </div>
+              </q-card-section>
+            </q-expansion-item>
+          </template>
+          <template v-else>
+            <div class="scrum-review-page__module-tools">
+              <div class="scrum-review-page__category-switch" role="group" aria-label="Filter generated tasks by development category">
+                <q-btn v-for="category in scrumCategoryFilters" :key="category" dense no-caps unelevated
+                  class="scrum-review-page__category-button" :class="{ 'is-active': scrumReviewCategoryFilter === category }"
+                  :label="category === 'All Categories' ? 'All Tasks' : category"
+                  :aria-pressed="scrumReviewCategoryFilter === category"
+                  @click="scrumReviewCategoryFilter = category" />
+              </div>
+              <div class="scrum-review-page__expand-actions">
+                <span>{{ scrumReviewModules.length }} modules · {{ scrumReviewVisibleTasks.length }} tasks</span>
+                <q-btn flat dense no-caps icon="unfold_more" label="Expand all" color="indigo-9" @click="setAllScrumModulesExpanded(true)" />
+                <q-btn flat dense no-caps icon="unfold_less" label="Collapse all" color="indigo-9" @click="setAllScrumModulesExpanded(false)" />
+              </div>
+            </div>
+            <q-expansion-item v-for="moduleName in scrumReviewModules" :key="moduleName"
+              :model-value="Boolean(scrumExpandedModules[moduleName])"
+              @update:model-value="scrumExpandedModules[moduleName] = $event"
+              class="scrum-review-page__story scrum-review-page__module-card" header-class="text-weight-bold" expand-separator>
+              <template #header>
+                <q-item-section avatar><q-icon name="layers" color="indigo-8" /></q-item-section>
+                <q-item-section><q-item-label class="scrum-review-page__module-name">{{ moduleName }}</q-item-label><q-item-label v-if="scrumModuleInfo[moduleName]?.description" caption>{{ scrumModuleInfo[moduleName]?.description }}</q-item-label><q-item-label caption>{{ scrumReviewModuleTasks(moduleName).filter(task => task.review === 'approved').length }} approved · {{ scrumReviewModuleTasks(moduleName).filter(task => task.review !== 'approved').length }} awaiting review</q-item-label></q-item-section>
+                <q-item-section side><q-badge class="scrum-review-page__module-count">{{ scrumReviewModuleTasks(moduleName).length }} tasks</q-badge></q-item-section>
+                <q-item-section side><q-btn flat dense round icon="edit" color="indigo-9" aria-label="Edit module" @click.stop="openScrumRequirementEditor('module', moduleName)"><q-tooltip>Edit Module</q-tooltip></q-btn></q-item-section>
+              </template>
+              <q-card-section class="q-pt-sm">
+                <div v-if="scrumReviewModuleTasks(moduleName).length === 0" class="text-caption text-grey-7 q-pa-sm">No tasks in this module yet. Add a task from an acceptance criterion and select this module.</div>
+                <div v-for="task in scrumReviewModuleTasks(moduleName)" :key="task.id" class="scrum-review-page__task">
+                  <div class="scrum-review-page__task-top">
+                    <span class="scrum-planner__trace-task-code">{{ task.id }}</span>
+                    <div class="scrum-review-page__task-name"><strong>{{ task.title }}</strong><small><span class="scrum-review-page__category-tag">{{ task.category }}</span> {{ task.points }} pts · {{ task.estimatedHours > 0 ? `${task.estimatedHours} hrs · ` : '' }}{{ task.userStory }} / {{ task.acceptanceCriteria }}</small></div>
+                    <span class="scrum-planner__review-state" :class="`is-${task.review}`">{{ scrumReviewLabel(task.review) }}</span>
+                  </div>
+                  <p>{{ task.description }}</p>
+                  <div class="scrum-review-page__dependencies"><b>Dependencies:</b> {{ task.dependencies.length ? task.dependencies.join(', ') : 'None' }}</div>
+                  <div class="scrum-review-page__actions">
+                    <q-btn dense flat round color="indigo-9" icon="visibility" :aria-label="`View task ${task.id}`" @click="scrumPreviewOrigin = 'review'; viewScrumGeneratedTask(task)"><q-tooltip>View Task</q-tooltip></q-btn>
+                    <q-btn dense flat round color="indigo-9" icon="edit" :aria-label="`Edit task ${task.id}`" @click="editScrumGeneratedTask(task)"><q-tooltip>Edit Task</q-tooltip></q-btn>
+                    <q-btn dense flat round color="negative" icon="delete_outline" :aria-label="`Remove task ${task.id}`" @click="confirmRemoveScrumTask(task)"><q-tooltip>Remove Task</q-tooltip></q-btn>
+                    <q-btn v-if="task.review !== 'approved'" dense flat round color="positive" icon="check_circle_outline" :aria-label="`Approve task ${task.id}`" @click="setScrumReview(task, 'approved')"><q-tooltip>Approve Task</q-tooltip></q-btn>
+                  </div>
+                </div>
+              </q-card-section>
+            </q-expansion-item>
+          </template>
+          <div v-if="scrumReviewVisibleTasks.length === 0 && (scrumReviewSearch.trim() || scrumReviewStatusFilter !== 'All Statuses' || scrumReviewCategoryFilter !== 'All Categories')" class="scrum-review-page__no-results">
+            <q-icon name="search_off" size="38px" color="blue-grey-5" />
+            <strong>No matching tasks</strong>
+            <span>Try a different category, review status, or search term.</span>
+            <q-btn flat no-caps color="indigo-9" label="Reset filters" @click="clearScrumReviewFilters" />
+          </div>
+        </div>
+        <footer class="scrum-review-page__footer">
+          <span>{{ approvedScrumTasks }} of {{ scrumTasks.length }} approved. All tasks must be approved before inviting stakeholders to Scrum Planning.</span>
+          <div class="row q-gutter-sm">
+            <q-btn flat no-caps label="Close Review" @click="scrumTaskReviewOpen = false" />
+            <q-btn unelevated no-caps color="indigo-9" icon-right="arrow_forward" label="Next: Invite Stakeholders"
+              :disable="!scrumReviewComplete" @click="proceedToScrumPlanning" />
+          </div>
+        </footer>
+      </q-card>
+    </q-dialog>
+
+    <!-- Detailed task preview with linked requirement traceability. -->
+    <q-dialog v-model="scrumViewOpen" maximized transition-show="slide-up" transition-hide="slide-down">
+      <q-card class="scrum-task-preview">
+        <template v-if="scrumViewTask">
+          <header class="scrum-task-preview__header">
+            <div>
+              <q-btn flat dense no-caps icon="arrow_back"  :label="scrumPreviewOrigin === 'kanban' ? 'Back to Kanban' : 'Back to Tasks'" color="indigo-9" @click="scrumViewOpen = false" />
+              <h2><q-icon name="fact_check" /> Task Preview</h2>
+              <p>Task information and linked requirement traceability</p>
+            </div>
+            <q-btn flat round icon="close" aria-label="Close task preview" @click="scrumViewOpen = false" />
+          </header>
+          <div class="scrum-task-preview__columns">
+            <section class="scrum-task-preview__left">
+              <div class="scrum-task-preview__summary">
+                <div class="scrum-task-preview__badges">
+                  <span class="scrum-task-preview__task-id">{{ scrumViewTask.id }}</span>
+                  <q-chip dense square color="blue-1" text-color="indigo-9" icon="terminal">{{ scrumViewTask.category }}</q-chip>
+                  <q-chip dense square :color="scrumViewTask.review === 'approved' ? 'green-1' : 'orange-1'" :text-color="scrumViewTask.review === 'approved' ? 'green-9' : 'orange-9'" :icon="scrumViewTask.review === 'approved' ? 'check_circle' : 'schedule'">{{ scrumReviewLabel(scrumViewTask.review) }}</q-chip>
+                  <q-chip dense square color="red-1" text-color="red-9" icon="flag">{{ scrumViewTask.priority }}</q-chip>
+                </div>
+                <h3>{{ scrumViewTask.title }}</h3>
+                <p>{{ scrumViewTask.description }}</p>
+              </div>
+              <q-tabs v-model="scrumPreviewTab" dense align="left" active-color="indigo-9" indicator-color="indigo-9" class="scrum-task-preview__tabs" no-caps>
+                <q-tab name="details" icon="list_alt" label="Task Details" />
+                <q-tab name="technical" icon="computer" label="Technical Details" />
+                <q-tab name="dependencies" icon="link" :label="`Dependencies (${scrumViewTask.dependencies.length})`" />
+                <q-tab name="comments" icon="chat_bubble_outline" :label="`Comments (${scrumTaskComments[scrumViewTask.id]?.length || 0})`" />
+                <q-tab name="attachments" icon="attach_file" :label="`Attachments (${scrumTaskAttachments[scrumViewTask.id]?.length || 0})`" />
+                <q-tab name="activity" icon="history" label="Activity" />
+              </q-tabs>
+              <q-tab-panels v-model="scrumPreviewTab" animated class="scrum-task-preview__panels">
+                <q-tab-panel name="details" class="q-pa-none">
+                  <dl class="scrum-task-preview__detail-list">
+                    <div><dt>Task ID</dt><dd>{{ scrumViewTask.id }}</dd></div>
+                    <div><dt>Task Type</dt><dd>{{ scrumViewTask.category }}</dd></div>
+                    <div><dt>Priority</dt><dd>{{ scrumViewTask.priority }}</dd></div>
+                    <div><dt>Review Status</dt><dd>{{ scrumReviewLabel(scrumViewTask.review) }}</dd></div>
+                    <div><dt>Assignee</dt><dd>{{ scrumAssigneeFor(scrumViewTask.id)?.name || 'Unassigned' }}</dd></div>
+                    <div><dt>Story Points</dt><dd>{{ scrumViewTask.points }}</dd></div>
+                    <div><dt>Estimated Hours</dt><dd>{{ scrumViewTask.estimatedHours > 0 ? `${scrumViewTask.estimatedHours} hours` : 'Not estimated' }}</dd></div>
+                    <div><dt>Sprint</dt><dd>{{ scrumSprints.find(sprint => sprint.id === scrumViewTask?.sprintId)?.name || 'Not planned' }}</dd></div>
+                    <div><dt>Description</dt><dd>{{ scrumViewTask.description }}</dd></div>
+                  </dl>
+                </q-tab-panel>
+                <q-tab-panel name="technical" class="q-pa-none">
+                  <dl class="scrum-task-preview__detail-list">
+                    <div><dt>Discipline</dt><dd>{{ scrumViewTask.category }}</dd></div>
+                    <div><dt>Module</dt><dd>{{ scrumViewTask.module }}</dd></div>
+                    <div><dt>Implementation</dt><dd>{{ scrumViewTask.description }}</dd></div>
+                    <div><dt>Originating source</dt><dd>{{ scrumViewTask.source }}</dd></div>
+                  </dl>
+                </q-tab-panel>
+                <q-tab-panel name="dependencies" class="q-pa-none">
+                  <section class="scrum-dependency-diagram" aria-label="Task dependency diagram">
+                    <header class="scrum-dependency-diagram__header">
+                      <div class="scrum-dependency-diagram__title"><q-icon name="device_hub" color="deep-purple-7" size="20px" /><strong>Dependency Diagram</strong></div>
+                      <div class="scrum-dependency-diagram__legend">
+                        <span><i class="scrum-dependency-diagram__line scrum-dependency-diagram__line--pre" /> Depends On</span>
+                        <span><i class="scrum-dependency-diagram__line scrum-dependency-diagram__line--post" /> Depended On By</span>
+                      </div>
+                    </header>
+                    <div class="scrum-dependency-diagram__scroll">
+                      <div class="scrum-dependency-diagram__graph">
+                        <section class="scrum-dependency-diagram__branch scrum-dependency-diagram__branch--pre" aria-label="Prerequisite tasks">
+                          <div class="scrum-dependency-diagram__branch-label">Prerequisites ({{ scrumViewPredecessorTasks.length }})</div>
+                          <button v-for="task in scrumViewPredecessorTasks" :key="task.id" type="button" class="scrum-dependency-diagram__node scrum-dependency-diagram__node--linked" @click="viewScrumGeneratedTask(task)">
+                            <span class="scrum-dependency-diagram__node-head"><strong>{{ task.id }}</strong><small>{{ task.category }}</small></span>
+                            <span class="scrum-dependency-diagram__node-title">{{ task.title }}</span>
+                            <span class="scrum-dependency-diagram__node-status">{{ scrumDependencyKanbanState(task.id).label }}</span>
+                          </button>
+                          <div v-if="!scrumViewPredecessorTasks.length" class="scrum-dependency-diagram__none">No prerequisites</div>
+                        </section>
+                        <div class="scrum-dependency-diagram__connector scrum-dependency-diagram__connector--pre" aria-hidden="true"><span /></div>
+                        <section class="scrum-dependency-diagram__center" aria-label="Selected task">
+                          <div class="scrum-dependency-diagram__branch-label">Selected task</div>
+                          <div class="scrum-dependency-diagram__node scrum-dependency-diagram__node--current">
+                            <span class="scrum-dependency-diagram__node-head"><strong>{{ scrumViewTask.id }}</strong><small>{{ scrumViewTask.category }}</small></span>
+                            <span class="scrum-dependency-diagram__node-title">{{ scrumViewTask.title }}</span>
+                            <span class="scrum-dependency-diagram__node-status">{{ scrumDependencyKanbanState(scrumViewTask.id).label }}</span>
+                          </div>
+                        </section>
+                        <div class="scrum-dependency-diagram__connector scrum-dependency-diagram__connector--post" aria-hidden="true"><span /></div>
+                        <section class="scrum-dependency-diagram__branch scrum-dependency-diagram__branch--post" aria-label="Dependent tasks">
+                          <div class="scrum-dependency-diagram__branch-label">Dependent tasks ({{ scrumViewSuccessorTasks.length }})</div>
+                          <button v-for="task in scrumViewSuccessorTasks" :key="task.id" type="button" class="scrum-dependency-diagram__node scrum-dependency-diagram__node--linked" @click="viewScrumGeneratedTask(task)">
+                            <span class="scrum-dependency-diagram__node-head"><strong>{{ task.id }}</strong><small>{{ task.category }}</small></span>
+                            <span class="scrum-dependency-diagram__node-title">{{ task.title }}</span>
+                            <span class="scrum-dependency-diagram__node-status">{{ scrumDependencyKanbanState(task.id).label }}</span>
+                          </button>
+                          <div v-if="!scrumViewSuccessorTasks.length" class="scrum-dependency-diagram__none">No dependent tasks</div>
+                        </section>
+                      </div>
+                    </div>
+                    <p class="scrum-dependency-diagram__hint"><q-icon name="info_outline" /> Select a connected task to view its dependencies. Statuses reflect Kanban; unscheduled tasks show Not planned.</p>
+                  </section>
+                </q-tab-panel>
+                <q-tab-panel name="comments" class="q-pa-none">
+                  <section class="scrum-preview-collab">
+                    <div class="scrum-preview-collab__heading"><strong>Task Comments</strong><span>{{ scrumTaskComments[scrumViewTask.id]?.length || 0 }} comments</span></div>
+                    <div v-if="!scrumTaskComments[scrumViewTask.id]?.length" class="scrum-preview-collab__empty">No comments yet. Add a note or update for this task.</div>
+                    <div v-for="comment in scrumTaskComments[scrumViewTask.id] || []" :key="comment.id" class="scrum-preview-comment">
+                      <q-avatar size="30px" color="indigo-1" text-color="indigo-9" icon="person" />
+                      <div class="scrum-preview-comment__content">
+                        <div class="scrum-preview-comment__meta"><strong>{{ comment.author }}</strong><span>{{ formatScrumCommentDate(comment.createdAt) }}</span></div>
+                        <div class="scrum-preview-comment__rich" v-html="sanitizeScrumCommentHtml(comment.html)" />
+                        <div class="scrum-preview-comment__reactions" aria-label="Comment reactions">
+                          <q-btn v-for="emoji in scrumCommentReactions" :key="emoji" dense no-caps unelevated
+                            :outline="!comment.reactions.includes(emoji)" :color="comment.reactions.includes(emoji) ? 'indigo-2' : 'grey-3'"
+                            text-color="indigo-9" class="scrum-preview-comment__reaction"
+                            :aria-label="`${comment.reactions.includes(emoji) ? 'Remove' : 'Add'} ${emoji} reaction`"
+                            :aria-pressed="comment.reactions.includes(emoji)"
+                            @click="toggleScrumCommentReaction(scrumViewTask.id, comment.id, emoji)">
+                            {{ emoji }} <span v-if="comment.reactions.includes(emoji)">1</span>
+                            <q-tooltip>{{ comment.reactions.includes(emoji) ? 'Remove reaction' : 'React to comment' }}</q-tooltip>
+                          </q-btn>
+                        </div>
+                      </div>
+                      <q-btn flat round dense color="negative" icon="delete_outline" aria-label="Remove comment" @click="removeScrumComment(scrumViewTask.id, comment.id)"><q-tooltip>Remove comment</q-tooltip></q-btn>
+                    </div>
+                    <div class="scrum-comment-editor q-mt-md" @paste.capture="onScrumCommentPaste">
+                      <div class="scrum-comment-editor__label">Write a comment</div>
+                      <q-editor
+                        ref="scrumCommentEditor"
+                        v-model="scrumCommentDraft"
+                        min-height="130px"
+                        placeholder="Add an update, use bullet points, or paste a screenshot (Ctrl+V)..."
+                        :toolbar="[['bold', 'italic', 'underline', 'strike'], ['unordered', 'ordered'], ['quote', 'link'], ['undo', 'redo']]"
+                        :definitions="{ link: { icon: 'link', tip: 'Insert link' } }"
+                        class="scrum-comment-editor__input"
+                      />
+                      <div class="scrum-comment-editor__extras">
+                        <q-btn flat dense no-caps icon="sentiment_satisfied_alt" label="Emoji" color="indigo-8" aria-label="Insert emoji in comment">
+                          <q-menu anchor="bottom left" self="top left">
+                            <div class="scrum-comment-emoji-picker" aria-label="Choose an emoji">
+                              <q-btn v-for="emoji in scrumCommentEmojis" :key="emoji" flat round dense :label="emoji"
+                                :aria-label="`Insert ${emoji}`" @click="insertScrumCommentEmoji(emoji)"><q-tooltip>{{ emoji }}</q-tooltip></q-btn>
+                            </div>
+                          </q-menu>
+                        </q-btn>
+                        <span class="scrum-comment-editor__hint"><q-icon name="image" size="16px" /> Paste images with Ctrl+V (max 2 MB). Use toolbar buttons for lists and formatting.</span>
+                      </div>
+                    </div>
+                    <div class="row justify-end q-mt-sm"><q-btn unelevated no-caps color="indigo-9" icon="send" label="Post Comment" :disable="!scrumCommentHasContent" @click="addScrumComment(scrumViewTask.id)" /></div>
+                    <small class="scrum-preview-collab__notice">Comments are stored only in this browser session, not on the server.</small>
+                  </section>
+                </q-tab-panel>
+                <q-tab-panel name="attachments" class="q-pa-none">
+                  <section class="scrum-preview-collab">
+                    <div class="scrum-preview-collab__heading"><strong>Task Attachments</strong><span>{{ scrumTaskAttachments[scrumViewTask.id]?.length || 0 }} files</span></div>
+                    <div v-if="!scrumTaskAttachments[scrumViewTask.id]?.length" class="scrum-preview-collab__empty">No attachments yet. Select files to add to this task.</div>
+                    <div v-for="file in scrumTaskAttachments[scrumViewTask.id] || []" :key="file.id" class="scrum-preview-file">
+                      <q-icon name="insert_drive_file" color="indigo-8" size="23px" />
+                      <div class="scrum-preview-file__info"><strong>{{ file.file.name }}</strong><small>{{ formatScrumFileSize(file.file.size) }}</small></div>
+                      <q-btn flat dense round icon="download" color="indigo-9" aria-label="Download attachment" @click="downloadScrumAttachment(file.file)"><q-tooltip>Download</q-tooltip></q-btn>
+                      <q-btn flat dense round icon="delete_outline" color="negative" aria-label="Remove attachment" @click="removeScrumAttachment(scrumViewTask.id, file.id)"><q-tooltip>Remove</q-tooltip></q-btn>
+                    </div>
+                    <label class="scrum-preview-upload"><q-icon name="upload_file" size="22px"/><span>Select files (max 10 MB each)</span><input type="file" multiple @change="onScrumFilesSelected($event, scrumViewTask.id)" /></label>
+                    <small class="scrum-preview-collab__notice">Files are kept in browser memory only. They are not uploaded or available to other users.</small>
+                  </section>
+                </q-tab-panel>
+                <q-tab-panel name="activity" class="q-pa-none">
+                  <div class="scrum-task-preview__empty"><q-icon name="history" size="26px" /><p>Activity history is not available in the current frontend preview. Changes are not persisted.</p></div>
+                </q-tab-panel>
+              </q-tab-panels>
+              <div class="scrum-task-preview__actions">
+                <q-btn outline no-caps color="indigo-9" icon="edit" label="Edit Task" @click="editScrumGeneratedTask(scrumViewTask); scrumViewOpen = false" />
+                <q-btn v-if="scrumViewTask.sprintId !== null" outline no-caps color="indigo-9" icon="view_kanban" label="View in Kanban" @click="openScrumPreviewKanban(scrumViewTask)" />
+              </div>
+            </section>
+            <section class="scrum-task-preview__right">
+              <div class="scrum-task-preview__trace-head"><q-icon name="track_changes" size="23px" /><strong>Requirement Traceability</strong><small>Task → Module → User Story → Acceptance Criteria</small></div>
+              <div class="scrum-task-preview__timeline">
+                <div class="scrum-task-preview__trace-node scrum-task-preview__trace-node--module">
+                  <div class="scrum-task-preview__trace-marker"><q-icon name="layers" /></div>
+                  <div class="scrum-task-preview__trace-label">Module</div>
+                  <div class="scrum-task-preview__trace-card"><strong>{{ scrumViewTask.module }}</strong><small v-if="scrumModuleInfo[scrumViewTask.module]?.code">Code: {{ scrumModuleInfo[scrumViewTask.module]?.code }}</small><p>{{ scrumModuleInfo[scrumViewTask.module]?.description || 'Module containing this development task.' }}</p></div>
+                </div>
+                <div class="scrum-task-preview__trace-node scrum-task-preview__trace-node--story">
+                  <div class="scrum-task-preview__trace-marker"><q-icon name="menu_book" /></div>
+                  <div class="scrum-task-preview__trace-label">User Story</div>
+                  <div class="scrum-task-preview__trace-card"><strong>{{ scrumViewTask.userStory }}</strong></div>
+                </div>
+                <div class="scrum-task-preview__trace-node scrum-task-preview__trace-node--criterion">
+                  <div class="scrum-task-preview__trace-marker"><q-icon name="fact_check" /></div>
+                  <div class="scrum-task-preview__trace-label">Acceptance Criteria</div>
+                  <div class="scrum-task-preview__trace-card">
+                    <div v-for="(criterion, index) in scrumCriteriaCatalog[scrumViewTask.userStory] || [scrumViewTask.acceptanceCriteria]" :key="`${index}-${criterion}`" class="scrum-task-preview__criterion" :class="{ 'is-linked': criterion === scrumViewTask.acceptanceCriteria }">
+                      <span>AC-{{ String(index + 1).padStart(2, '0') }}</span>
+                      <p>{{ criterion }}</p>
+                      <q-icon v-if="criterion === scrumViewTask.acceptanceCriteria" name="check_circle" color="positive" size="18px"><q-tooltip>This task directly supports this criterion</q-tooltip></q-icon>
+                    </div>
+                    <small class="scrum-task-preview__criterion-note"><q-icon name="check_circle" color="positive" /> Checked criteria are directly linked to this task.</small>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </template>
+        <template v-else>
+          <q-card-section class="row items-center justify-between"><div class="text-h6">Acceptance Criterion</div><q-btn flat round icon="close" v-close-popup /></q-card-section>
+          <q-separator />
+          <q-card-section class="q-gutter-md">
+            <div><b>User Story:</b> {{ scrumViewStory }}</div>
+            <div><b>Acceptance Criterion:</b> {{ scrumViewCriterion }}</div>
+            <div><b>Linked tasks:</b> {{ scrumReviewTasksFor(scrumViewStory, scrumViewCriterion).length }}</div>
+            <q-list bordered separator><q-item v-for="task in scrumReviewTasksFor(scrumViewStory, scrumViewCriterion)" :key="task.id"><q-item-section><q-item-label>{{ task.id }} · {{ task.title }}</q-item-label><q-item-label caption>{{ task.module }} · {{ task.category }}</q-item-label></q-item-section></q-item></q-list>
+          </q-card-section>
+          <q-card-actions align="right"><q-btn flat no-caps label="Close" v-close-popup /></q-card-actions>
+        </template>
+      </q-card>
+    </q-dialog>
+
+    <!-- Dedicated User Story form with a live story preview and editable acceptance criteria. -->
+    <q-dialog v-model="scrumStoryCreateOpen" persistent>
+      <q-card class="scrum-creation-dialog" style="width: 680px; max-width: 96vw">
+        <q-form @submit.prevent="saveScrumStoryCreator">
+          <q-card-section class="row items-center justify-between">
+            <div class="row items-center q-gutter-sm">
+              <q-icon name="menu_book" size="26px" color="indigo-9" />
+              <div><div class="text-h6 text-weight-bold">Add User Story</div><div class="text-caption text-grey-7">ONE ICTMS / Requirements Management</div></div>
+            </div>
+            <q-btn flat round icon="close" aria-label="Close Add User Story" @click="scrumStoryCreateOpen = false" />
+          </q-card-section>
+          <q-separator />
+          <q-card-section class="scroll q-gutter-md" style="max-height: 65vh">
+            <q-input v-model.trim="scrumNewStoryTitle" outlined label="Story title *" placeholder="e.g., View Latest Highlights" :rules="[v => !!String(v || '').trim() || 'Required']" />
+            <q-input v-model.trim="scrumNewStoryRole" outlined label="User role *" placeholder="e.g., Public User, Admin, Encoder" :rules="[v => !!String(v || '').trim() || 'Required']" />
+            <q-input v-model.trim="scrumNewStoryGoal" outlined type="textarea" autogrow label="I want to... *" :rules="[v => !!String(v || '').trim() || 'Required']" />
+            <q-input v-model.trim="scrumNewStoryBenefit" outlined type="textarea" autogrow label="So that... *" :rules="[v => !!String(v || '').trim() || 'Required']" />
+            <div class="scrum-creation-dialog__preview">
+              <strong>User Story Preview</strong>
+              <p class="q-mb-none">{{ scrumNewStoryPreview }}</p>
+            </div>
+            <q-separator />
+            <div class="row items-center justify-between">
+              <strong>Acceptance Criteria</strong>
+              <q-btn flat no-caps color="indigo-9" icon="add" label="Add Criteria" @click="scrumNewStoryCriteria.push('')" />
+            </div>
+            <div v-for="(criterion, index) in scrumNewStoryCriteria" :key="index" class="row items-start no-wrap q-gutter-sm">
+              <q-input :model-value="criterion" @update:model-value="scrumNewStoryCriteria[index] = String($event || '')" outlined autogrow type="textarea" class="col" :label="`AC-${String(index + 1).padStart(2, '0')}`" placeholder="Define a testable acceptance criterion" />
+              <q-btn flat round icon="delete_outline" color="negative" :disable="scrumNewStoryCriteria.length === 1" @click="scrumNewStoryCriteria.splice(index, 1)"><q-tooltip>Remove criterion</q-tooltip></q-btn>
+            </div>
+            <q-banner v-if="scrumStoryCreateError" rounded class="bg-red-1 text-negative">{{ scrumStoryCreateError }}</q-banner>
+          </q-card-section>
+          <q-separator />
+          <q-card-actions align="right" class="q-pa-md">
+            <q-btn flat no-caps label="Clear" @click="resetScrumStoryCreator" />
+            <q-btn flat no-caps label="Cancel" @click="scrumStoryCreateOpen = false" />
+            <q-btn unelevated no-caps color="indigo-9" type="submit" icon="check" label="Add User Story" />
+          </q-card-actions>
+        </q-form>
+      </q-card>
+    </q-dialog>
+
+    <!-- Dedicated Module form; existing requirement links and optional task are supported. -->
+    <q-dialog v-model="scrumModuleCreateOpen" persistent>
+      <q-card class="scrum-creation-dialog" style="width: 700px; max-width: 96vw">
+        <q-form @submit.prevent="saveScrumModuleCreator">
+          <q-card-section class="row items-center justify-between">
+            <div class="row items-center q-gutter-sm">
+              <q-icon name="layers" size="26px" color="indigo-9" />
+              <div><div class="text-h6 text-weight-bold">Add Module</div><div class="text-caption text-grey-7">ONE ICTMS / Requirements &amp; Task Management</div></div>
+            </div>
+            <q-btn flat round icon="close" aria-label="Close Add Module" @click="scrumModuleCreateOpen = false" />
+          </q-card-section>
+          <q-separator />
+          <q-card-section class="scroll q-gutter-md" style="max-height: 65vh">
+            <q-input v-model.trim="scrumUnifiedNewModule" outlined label="Module name *" placeholder="e.g., Latest Highlights, User Management" :rules="[v => !!String(v || '').trim() || 'Required']" />
+            <div class="row q-col-gutter-md">
+              <div class="col-12 col-sm-6"><q-input v-model.trim="scrumUnifiedModuleCode" outlined label="Module code" placeholder="e.g., MOD-001" /></div>
+              <div class="col-12 col-sm-6"><q-select v-model="scrumUnifiedModuleStatus" outlined label="Status" :options="['Draft', 'Under Review', 'Approved']" /></div>
+            </div>
+            <q-input v-model.trim="scrumUnifiedModuleDescription" outlined type="textarea" autogrow label="Module description *" :rules="[v => !!String(v || '').trim() || 'Required']" />
+            <q-separator />
+            <div class="row items-center q-gutter-sm"><q-icon name="link" color="indigo-9" /><strong>Requirement Traceability</strong></div>
+            <div class="text-caption text-grey-7">Optionally link this module to an existing User Story and Acceptance Criterion.</div>
+            <q-select v-model="scrumUnifiedExistingStory" outlined clearable label="Linked User Story" :options="scrumStoryCatalog" @update:model-value="scrumUnifiedExistingCriterion = null" />
+            <q-select v-model="scrumUnifiedExistingCriterion" outlined clearable :disable="!scrumUnifiedExistingStory" label="Linked Acceptance Criterion" :options="scrumUnifiedCriterionOptions" />
+            <q-separator />
+            <div class="row items-center justify-between">
+              <div><strong>Module Tasks</strong><div class="text-caption text-grey-7">{{ scrumUnifiedAddTask ? '1 new task being prepared' : '0 tasks added' }}</div></div>
+              <q-btn flat no-caps color="indigo-9" :icon="scrumUnifiedAddTask ? 'remove' : 'add'" :label="scrumUnifiedAddTask ? 'Remove Task' : 'Add Task'" @click="scrumUnifiedAddTask = !scrumUnifiedAddTask" />
+            </div>
+            <div v-if="scrumUnifiedAddTask" class="q-gutter-md">
+              <q-input v-model.trim="scrumUnifiedTaskTitle" outlined label="Task title *" />
+              <div class="row q-col-gutter-md">
+                <div class="col-12 col-sm-6"><q-select v-model="scrumUnifiedTaskCategory" outlined label="Category" :options="['Frontend', 'Backend', 'DB', 'UI/UX']" /></div>
+                <div class="col-12 col-sm-6"><q-select v-model="scrumUnifiedTaskPriority" outlined label="Priority" :options="['High', 'Medium', 'Low']" /></div>
+              </div>
+              <q-input v-model.trim="scrumUnifiedTaskDescription" outlined type="textarea" autogrow label="Task details *" />
+              <div class="row q-col-gutter-md">
+                <div class="col-12 col-sm-4"><q-input v-model.number="scrumUnifiedTaskPoints" type="number" min="1" max="100" outlined label="Story points *" /></div>
+                <div class="col-12 col-sm-4"><q-input v-model.number="scrumUnifiedTaskEstimatedHours" type="number" min="0" step="0.5" outlined label="Estimated Hours" hint="0 = not estimated" /></div>
+                <div class="col-12 col-sm-8"><q-select v-model="scrumUnifiedTaskDependencies" multiple use-chips clearable outlined emit-value map-options label="Task dependencies" :options="scrumTasks.map(task => ({ label: `${task.id} · ${task.title}`, value: task.id }))" /></div>
+              </div>
+              <div class="text-caption text-grey-7">New tasks start as Pending Review.</div>
+            </div>
+            <q-banner v-if="scrumUnifiedError" rounded class="bg-red-1 text-negative">{{ scrumUnifiedError }}</q-banner>
+          </q-card-section>
+          <q-separator />
+          <q-card-actions align="right" class="q-pa-md">
+            <q-btn flat no-caps label="Clear" @click="resetScrumModuleCreator" />
+            <q-btn flat no-caps label="Cancel" @click="scrumModuleCreateOpen = false" />
+            <q-btn unelevated no-caps color="indigo-9" type="submit" icon="check" label="Add Module" />
+          </q-card-actions>
+        </q-form>
+      </q-card>
+    </q-dialog>
+
+    <!-- Edit a user story, acceptance criterion, or module while preserving task traceability. -->
+    <q-dialog v-model="scrumRequirementEditorOpen" persistent>
+      <q-card style="width: 580px; max-width: 95vw">
+        <q-card-section class="row items-center justify-between">
+          <div class="text-h6">Edit {{ scrumRequirementKind === 'story' ? 'User Story' : scrumRequirementKind === 'criterion' ? 'Acceptance Criterion' : 'Module' }}</div>
+          <q-btn flat round icon="close" @click="scrumRequirementEditorOpen = false" />
+        </q-card-section>
+        <q-form @submit.prevent="saveScrumRequirement">
+          <q-card-section>
+            <q-input v-model.trim="scrumRequirementDraft" outlined autofocus type="textarea" autogrow label="Description / Name *"
+              :rules="[value => !!String(value || '').trim() || 'Required']" />
+            <div class="text-caption text-grey-7 q-mt-sm">Related task links will be updated. Affected tasks will require approval again.</div>
+            <q-banner v-if="scrumRequirementError" class="bg-red-1 text-negative q-mt-md" rounded>{{ scrumRequirementError }}</q-banner>
+          </q-card-section>
+          <q-card-actions align="right">
+            <q-btn flat no-caps label="Cancel" @click="scrumRequirementEditorOpen = false" />
+            <q-btn unelevated no-caps color="indigo-9" type="submit" icon="save" label="Save Changes" />
+          </q-card-actions>
+        </q-form>
+      </q-card>
+    </q-dialog>
+
+    <!-- Task editor: requirement links and implementation details remain visible and editable. -->
+    <q-dialog v-model="scrumEditTaskOpen" persistent>
+      <q-card class="scrum-task-editor">
+        <q-card-section class="row items-center justify-between">
+          <div><div class="text-h6 text-weight-bold">{{ scrumCreatingTask ? 'Add Task' : 'Edit Generated Task' }} · {{ scrumTaskDraft?.id }}</div>
+            <div class="text-caption text-grey-7">{{ scrumCreatingTask ? 'This task will be linked to the selected acceptance criterion and start as Pending review.' : 'Editing a task returns it to Pending review.' }}</div></div>
+          <q-btn flat round icon="close" @click="scrumEditTaskOpen = false" />
+        </q-card-section>
+        <q-separator />
+        <q-form v-if="scrumTaskDraft" @submit.prevent="saveScrumGeneratedTask">
+          <q-card-section class="scrum-task-editor__fields">
+            <q-input v-model.trim="scrumTaskDraft.title" outlined dense label="Task title *" :rules="[value => !!String(value || '').trim() || 'Required']" />
+            <div class="scrum-task-editor__grid">
+              <q-select v-model="scrumTaskDraft.category" outlined dense label="Discipline *" :options="['Frontend','Backend','DB','UI/UX']" />
+              <q-select v-model="scrumTaskDraft.priority" outlined dense label="Priority" :options="['High','Medium','Low']" />
+            </div>
+            <q-select v-model="scrumTaskDraft.userStory" outlined dense label="Linked User Story *" :options="scrumUserStories" :disable="scrumCreatingTask" @update:model-value="onScrumDraftStoryChanged" />
+            <q-select v-model="scrumTaskDraft.acceptanceCriteria" outlined dense label="Acceptance Criteria *" :options="scrumDraftCriteriaOptions" :disable="scrumCreatingTask" />
+            <q-select v-model="scrumTaskDraft.module" outlined dense use-input fill-input hide-selected new-value-mode="add-unique" label="Module *" :options="scrumModuleCatalog" :rules="[value => !!String(value || '').trim() || 'Required']" />
+            <q-input v-model.trim="scrumTaskDraft.description" type="textarea" autogrow outlined dense label="Task Details *" :rules="[value => !!String(value || '').trim() || 'Required']" />
+            <q-select v-model="scrumTaskDraft.dependencies" multiple use-chips clearable outlined dense emit-value map-options label="Task Dependencies"
+              :options="scrumDependencyOptions" hint="Only other tasks can be selected. Dependency loops are rejected." />
+            <div class="scrum-task-editor__grid">
+              <q-input v-model.number="scrumTaskDraft.points" type="number" min="1" max="100" outlined dense label="Story Points *" :rules="[value => Number(value) >= 1 && Number(value) <= 100 || 'Enter 1–100']" />
+              <q-input v-model.number="scrumTaskDraft.estimatedHours" type="number" min="0" step="0.5" outlined dense label="Estimated Hours" hint="0 = not estimated" :rules="[value => Number.isFinite(Number(value)) && Number(value) >= 0 || 'Enter 0 or more hours']" />
+            </div>
+            <q-banner v-if="scrumEditTaskError" rounded class="bg-red-1 text-negative">{{ scrumEditTaskError }}</q-banner>
+          </q-card-section>
+          <q-separator />
+          <q-card-actions align="right" class="q-pa-md">
+            <q-btn flat no-caps label="Cancel" @click="scrumEditTaskOpen = false" />
+            <q-btn type="submit" unelevated no-caps color="indigo-9" :icon="scrumCreatingTask ? 'add' : 'save'" :label="scrumCreatingTask ? 'Add Task' : 'Save Changes'" />
+          </q-card-actions>
+        </q-form>
       </q-card>
     </q-dialog>
 
@@ -691,6 +1206,7 @@
             </div>
           </div>
           <div class="scrum-planner__header-actions">
+            <q-btn flat no-caps color="white" icon="fact_check" label="Review Tasks" @click="returnToScrumTaskReview" />
             <q-badge class="scrum-planner__preview-badge">UI PREVIEW · NO TASKS SAVED</q-badge>
             <q-btn flat round icon="close" color="white" aria-label="Close Scrum planning" @click="scrumPlanningOpen = false" />
           </div>
@@ -707,11 +1223,6 @@
           <div class="scrum-planner__metric"><q-icon name="description" /><div><strong>4</strong><span>Source document types</span></div></div>
         </div>
 
-        <div class="scrum-planner__notice">
-          <q-icon name="info_outline" size="19px" />
-          <span><strong>Frontend preview.</strong> Proposed development tasks mapped to Public User stories and acceptance criteria from the Phase 1 LGBTQIA+ workbook. These are not generated from uploaded documents; review and sprint changes are not saved.</span>
-        </div>
-
         <div class="scrum-planner__workspace">
           <section class="scrum-planner__column scrum-planner__column--sprint" aria-labelledby="scrum-sprint-title">
             <div class="scrum-planner__column-head">
@@ -725,27 +1236,121 @@
                 :class="{ 'is-selected': activeSprintId === sprint.id }" @click="activeSprintId = sprint.id">{{ sprint.name }} <span>{{ countScrumSprintTasks(sprint.id) }}</span></button>
             </div>
             <div class="scrum-planner__sprint-summary">
-              <div><span>SELECTED SPRINT</span><strong>{{ activeScrumSprintName }}</strong></div>
-              <div><span>ESTIMATED EFFORT</span><strong>{{ activeScrumSprintPoints }} story points</strong></div>
+              <div class="scrum-planner__sprint-label"><span>SELECTED SPRINT</span><strong>{{ activeScrumSprintName }}</strong></div>
+              <div v-if="activeScrumSprint" class="scrum-planner__sprint-dates">
+                <q-input v-model="activeScrumSprint.startDate" outlined dense type="date" stack-label label="Start date" aria-label="Sprint start date" :max="activeScrumSprint.endDate || undefined" />
+                <q-input v-model="activeScrumSprint.endDate" outlined dense type="date" stack-label label="End date" aria-label="Sprint end date" :min="activeScrumSprint.startDate || undefined" />
+              </div>
+              <div class="scrum-planner__sprint-effort"><span>ESTIMATED EFFORT</span><strong>{{ activeScrumSprintPoints }} story points</strong><small>{{ activeScrumSprintHours > 0 ? `${activeScrumSprintHours} estimated hours` : 'Hours not estimated' }}</small></div>
             </div>
+            <q-banner v-if="scrumManagingOfficeError" dense class="bg-orange-1 text-orange-10 q-mx-md q-my-sm" rounded>
+              {{ scrumManagingOfficeError }}
+            </q-banner>
             <div class="scrum-planner__dropzone" :class="{ 'is-over': scrumDropOver }" @dragover.prevent="scrumDropOver = true" @dragleave="scrumDropOver = false" @drop.prevent="onScrumDropToSprint">
               <div v-if="activeScrumSprintTasks.length === 0" class="scrum-planner__drop-hint">
                 <span class="scrum-planner__drop-icon"><q-icon name="move_to_inbox" size="35px" /></span>
                 <strong>Build your sprint backlog</strong><p>Approve eligible tasks first, then drag them here or select <b>Plan</b>.</p>
                 <span>Review decisions stay visible on each task.</span>
               </div>
-              <article v-for="task in activeScrumSprintTasks" :key="task.id" class="scrum-planner__planned-task" draggable="true"
-                @dragstart="onScrumDragStart($event, task.id)" @dragend="scrumDraggingId = null">
-                <div class="scrum-planner__task-meta"><span class="scrum-planner__category" :class="`scrum-planner__category--${task.category.toLowerCase().replace('/', '-')}`">{{ task.category }}</span><q-icon name="drag_indicator" class="scrum-planner__drag-handle" /></div>
-                <h4>{{ task.title }}</h4>
-                <div class="scrum-planner__planned-context">{{ task.category }} · {{ task.module }} · {{ task.userStory }}</div>
-                <div class="scrum-planner__planned-context">Dependencies: {{ task.dependencies.length ? task.dependencies.join(', ') : 'None' }}</div>
-                <div class="scrum-planner__planned-bottom"><span>{{ task.points }} pts · {{ task.priority }} priority</span><span class="scrum-planner__review-state" :class="`is-${task.review}`">{{ scrumReviewLabel(task.review) }}</span></div>
-                <div class="scrum-planner__planned-actions">
-                  <q-btn flat dense no-caps icon="check_circle_outline" label="Approve" color="positive" :disable="task.review === 'approved'" @click="task.review = 'approved'" />
-                  <q-btn flat dense no-caps icon="undo" label="Backlog" color="indigo-9" @click="moveScrumTask(task.id, null)" />
+              <section v-for="group in activeScrumSprintModules" :key="group.module" class="scrum-plan-module-card scrum-plan-sprint-card">
+                <div class="scrum-plan-module-header scrum-plan-sprint-module-title"
+                  draggable="true"
+                  :aria-label="`Drag ${group.module} module back to backlog`"
+                  @dragstart.stop="onScrumModuleDragStart($event, group.module, 'sprint')"
+                  @dragend="clearScrumDrag()">
+                  <q-icon name="drag_indicator" size="19px" class="scrum-plan-module-drag-handle" />
+                  <q-icon name="layers" size="21px" color="indigo-8" />
+                  <span class="scrum-plan-module-name">{{ group.module }}</span>
+                  <span class="scrum-plan-module-count">{{ group.tasks.length }} task{{ group.tasks.length === 1 ? '' : 's' }}</span>
+                  <q-tooltip>Drag this module back to the task backlog</q-tooltip>
                 </div>
-              </article>
+                <div class="scrum-plan-module-tasks">
+                  <article v-for="task in group.tasks" :key="task.id" class="scrum-plan-task-row"
+                    draggable="true" @dragstart.stop="onScrumDragStart($event, task.id)" @dragend="clearScrumDrag()">
+                    <span class="scrum-plan-task-code">{{ task.id }}</span>
+                    <div class="scrum-plan-task-copy">
+                      <strong>{{ task.title }}</strong>
+                      <span>{{ task.category }} · {{ task.points }} pts · {{ task.estimatedHours > 0 ? `${task.estimatedHours} hrs · ` : '' }}{{ task.priority }} priority</span>
+                      <span v-if="task.dependencies.length">Dependencies: {{ task.dependencies.join(', ') }}</span>
+                    </div>
+                    <div class="scrum-assignee" @mousedown.stop @dragstart.stop>
+                      <q-btn
+                        no-caps unelevated
+                        class="scrum-assignee__trigger"
+                        :class="{ 'scrum-assignee__trigger--assigned': scrumTaskAssignees[task.id] != null }"
+                        :disable="scrumManagingOfficeLoading || scrumManagingOfficeUsers.length === 0"
+                        :aria-label="`Assign ${task.id} to a Managing Office member`"
+                      >
+                        <q-avatar size="26px" class="scrum-assignee__avatar"
+                          :class="{ 'scrum-assignee__avatar--assigned': scrumTaskAssignees[task.id] != null }">
+                          {{ scrumAssigneeFor(task.id) ? userInitials(scrumAssigneeFor(task.id)?.name || '') : '+' }}
+                        </q-avatar>
+                        <span class="scrum-assignee__copy">
+                          <small>{{ scrumTaskAssignees[task.id] != null ? 'Assigned to' : 'Task owner' }}</small>
+                          <strong>{{ scrumAssigneeFor(task.id)?.name || 'Assign member' }}</strong>
+                        </span>
+                        <q-icon name="keyboard_arrow_down" size="19px" class="scrum-assignee__arrow" />
+                        <q-menu anchor="bottom right" self="top right" :offset="[0, 6]"
+                          class="scrum-assignee__menu" @show="scrumAssigneeSearch = ''">
+                          <div class="scrum-assignee__menu-head">
+                            <strong>Assign task · {{ task.id }}</strong>
+                            <span>Managing Office members</span>
+                          </div>
+                          <q-input v-model="scrumAssigneeSearch" dense outlined clearable autofocus
+                            placeholder="Search name or email" class="scrum-assignee__search">
+                            <template #prepend><q-icon name="search" size="18px" /></template>
+                          </q-input>
+                          <q-list class="scrum-assignee__options">
+                            <q-item v-for="person in filteredScrumAssignees" :key="person.id"
+                              clickable v-close-popup
+                              :active="scrumTaskAssignees[task.id] === person.id"
+                              active-class="scrum-assignee__option--selected"
+                              @click="setScrumTaskAssignee(task.id, person.id)">
+                              <q-item-section avatar>
+                                <q-avatar size="32px" color="indigo-1" text-color="indigo-9">{{ userInitials(person.name) }}</q-avatar>
+                              </q-item-section>
+                              <q-item-section>
+                                <q-item-label class="text-weight-medium">{{ person.name }}</q-item-label>
+                                <q-item-label caption>{{ person.email || 'No email provided' }}</q-item-label>
+                              </q-item-section>
+                              <q-item-section side v-if="scrumTaskAssignees[task.id] === person.id">
+                                <q-icon name="check_circle" color="positive" size="19px" />
+                              </q-item-section>
+                            </q-item>
+                            <q-item v-if="!filteredScrumAssignees.length">
+                              <q-item-section class="text-grey-7 text-caption">No matching members found.</q-item-section>
+                            </q-item>
+                          </q-list>
+                          <template v-if="scrumTaskAssignees[task.id] != null">
+                            <q-separator />
+                            <q-item clickable v-close-popup class="text-negative"
+                              @click="setScrumTaskAssignee(task.id, null)">
+                              <q-item-section avatar><q-icon name="person_remove" /></q-item-section>
+                              <q-item-section>Unassign task</q-item-section>
+                            </q-item>
+                          </template>
+                        </q-menu>
+                      </q-btn>
+                      <q-tooltip v-if="scrumManagingOfficeUsers.length === 0">
+                        {{ scrumManagingOfficeLoading ? 'Loading Managing Office users' : 'No Managing Office members available' }}
+                      </q-tooltip>
+                    </div>
+                    <q-btn flat dense round icon="info_outline" color="indigo-8" aria-label="View task details"
+                      @click="expandedScrumTaskId = expandedScrumTaskId === task.id ? null : task.id">
+                      <q-tooltip>Task details</q-tooltip>
+                    </q-btn>
+                    <q-btn flat dense round icon="undo" color="indigo-8" aria-label="Return task to backlog"
+                      @click="moveScrumTask(task.id, null)">
+                      <q-tooltip>Return to backlog</q-tooltip>
+                    </q-btn>
+                    <div v-if="expandedScrumTaskId === task.id" class="scrum-plan-task-details">
+                      <div>{{ task.description }}</div>
+                      <div><b>Source:</b> {{ task.userStory }} / {{ task.acceptanceCriteria }}</div>
+                      <div><b>Dependencies:</b> {{ task.dependencies.length ? task.dependencies.join(', ') : 'None' }}</div>
+                    </div>
+                  </article>
+                </div>
+              </section>
             </div>
             <div class="scrum-planner__sprint-footer"><q-icon name="verified_user" size="18px" /><span>Project Manager / Scrum Master review required before sprint execution.</span></div>
           </section>
@@ -754,133 +1359,208 @@
             <div class="scrum-planner__column-head">
               <div class="scrum-planner__column-title">
                 <span class="scrum-planner__column-icon scrum-planner__column-icon--ai"><q-icon name="auto_awesome" size="22px" /></span>
-                <div><h3 id="scrum-suggestions-title">Task Suggestions</h3><p>Development backlog · approve before planning</p></div>
+                <div><h3 id="scrum-suggestions-title">Tasks</h3><p>Development backlog · approve before planning</p></div>
               </div>
               <q-badge class="scrum-planner__count">{{ unscheduledScrumTasks }} unplanned</q-badge>
             </div>
-            <div class="scrum-planner__view-tabs" role="tablist" aria-label="Task connections">
-              <button type="button" role="tab" :aria-selected="scrumTaskView === 'categories'" class="scrum-planner__view-tab"
-                :class="{ 'is-selected': scrumTaskView === 'categories' }" @click="scrumTaskView = 'categories'">
-                <q-icon name="category" size="16px" /> Task List
-              </button>
-              <button type="button" role="tab" :aria-selected="scrumTaskView === 'traceability'" class="scrum-planner__view-tab"
-                :class="{ 'is-selected': scrumTaskView === 'traceability' }" @click="scrumTaskView = 'traceability'">
-                <q-icon name="account_tree" size="16px" /> Traceability View
-              </button>
-            </div>
-            <div v-if="scrumTaskView === 'categories'" class="scrum-planner__filters" role="group" aria-label="Filter tasks by development category">
-              <button v-for="category in scrumCategoryFilters" :key="category" type="button" class="scrum-planner__filter"
-                :class="{ 'is-selected': scrumCategoryFilter === category }" @click="scrumCategoryFilter = category">{{ category }}</button>
-            </div>
-            <div v-else class="scrum-planner__connection-panel">
-              <div class="scrum-planner__connection-label">User Stories</div>
-              <div class="scrum-planner__connection-tabs" role="tablist" aria-label="Select user story">
-                <button v-for="story in scrumUserStories" :key="story" type="button" role="tab"
-                  :aria-selected="selectedScrumStory === story" class="scrum-planner__filter"
-                  :class="{ 'is-selected': selectedScrumStory === story }" @click="selectScrumStory(story)">
-                  {{ story.split(':')[0] }} <span class="scrum-planner__connection-count">{{ scrumTasks.filter(task => task.userStory === story).length }}</span>
-                </button>
+            <!-- Scrum Planning presents only Module -> Task. Requirement editing stays in the review step. -->
+            <div class="scrum-plan-module-toolbar">
+              <div class="scrum-plan-module-filters" role="group" aria-label="Filter tasks by development category">
+                <button v-for="category in scrumCategoryFilters" :key="category" type="button"
+                  class="scrum-planner__filter" :class="{ 'is-selected': scrumCategoryFilter === category }"
+                  @click="scrumCategoryFilter = category">{{ category === 'All Categories' ? 'All Tasks' : category }}</button>
               </div>
-              <div v-if="selectedScrumStory" class="scrum-planner__connection-story"><q-icon name="menu_book" size="17px" /> {{ selectedScrumStory }}</div>
-              <div class="scrum-planner__connection-caption">Expand an acceptance criterion to see every generated task linked to its module, including tasks already assigned to sprints.</div>
+              <div class="scrum-plan-module-tools">
+                <span>{{ scrumBacklogModuleGroups.length }} modules · {{ visibleScrumSuggestions.length }} tasks</span>
+              </div>
             </div>
-            <div v-if="scrumTaskView === 'categories'" class="scrum-planner__task-list" @dragover.prevent @drop="onScrumDropToBacklog">
-              <section v-for="group in visibleScrumTaskGroups" :key="group.key" class="scrum-planner__module-group">
-                <article v-for="task in group.tasks" :key="task.id" class="scrum-planner__task"
-                draggable="true" @dragstart="onScrumDragStart($event, task.id)" @dragend="scrumDraggingId = null"
-                :class="{ 'is-dragging': scrumDraggingId === task.id }">
-                <div class="scrum-planner__task-meta">
-                  
-                  <span class="scrum-planner__category" :class="`scrum-planner__category--${task.category.toLowerCase().replace('/', '-')}`">{{ task.category }}</span>
-                  <q-icon name="drag_indicator" class="scrum-planner__drag-handle" aria-label="Drag task" />
-                </div>
-                <h4>{{ task.title }}</h4>
-                <div class="scrum-planner__trace">
-                  <div><b>User Story</b><span>{{ task.userStory }}</span></div>
-                  <div><b>Acceptance Criteria</b><span>{{ task.acceptanceCriteria }}</span></div>
-                  <div><b>Module</b><span>{{ task.module }}</span></div>
-                  <div><b>Task</b><span>{{ task.title }}</span></div>
-                  <div><b>Task Details</b><span>{{ task.description }}</span></div>
-                  <div><b>Task Dependencies</b><span>{{ task.dependencies.length ? task.dependencies.join(', ') : 'None' }}</span></div>
-                  <div><b>Source Document</b><span>{{ task.source }}</span></div>
-                </div>
-                <div class="scrum-planner__task-bottom">
-                  <div class="scrum-planner__tags"><span><q-icon name="schedule" size="14px" /> {{ task.points }} pts</span><span>{{ task.priority }} priority</span></div>
-                  <span class="scrum-planner__review-state" :class="`is-${task.review}`">{{ scrumReviewLabel(task.review) }}</span>
-                </div>
-                <div class="scrum-planner__review-actions">
-                  <q-btn flat dense no-caps icon="check_circle_outline" label="Approve" color="positive" :disable="task.review === 'approved'" @click="task.review = 'approved'" />
-                  <q-btn flat dense no-caps icon="rate_review" label="Needs revision" color="orange-9" :disable="task.review === 'revision'" @click="task.review = 'revision'" />
-                  <q-btn v-if="task.sprintId === null" flat dense no-caps icon="add_circle_outline" label="Plan" color="indigo-9" :disable="!canPlanScrumTask(task)" @click="moveScrumTask(task.id, activeSprintId)" />
-                  <q-btn v-else flat dense no-caps icon="undo" label="Return to Backlog" color="indigo-9" @click="moveScrumTask(task.id, null)" />
-                </div>
-                </article>
-              </section>
-              <div v-if="visibleScrumSuggestions.length === 0" class="scrum-planner__empty"><q-icon name="inventory_2" size="32px" /><strong>No matching tasks</strong><span>Choose another category, user story, or acceptance criterion.</span></div>
-            </div>
-            <div v-else class="scrum-planner__task-list scrum-planner__trace-accordion" @dragover.prevent @drop="onScrumDropToBacklog">
-              <q-expansion-item v-for="(criterion, index) in scrumStoryCriteria" :key="`${selectedScrumStory}-${criterion}`"
-                expand-separator dense-toggle class="scrum-planner__criterion-item" header-class="scrum-planner__criterion-header"
-                :default-opened="index === 0">
-                <template #header>
-                  <q-item-section avatar><q-icon name="fact_check" color="indigo-8" size="20px" /></q-item-section>
-                  <q-item-section>
-                    <q-item-label class="text-weight-medium">AC-{{ String(index + 1).padStart(2, '0') }} · {{ criterion }}</q-item-label>
-                    <q-item-label caption>{{ scrumTasks.filter(task => task.userStory === selectedScrumStory && task.acceptanceCriteria === criterion).length }} tasks generated</q-item-label>
-                  </q-item-section>
-                </template>
-                <div class="scrum-planner__criterion-body">
-                  <section v-for="group in scrumGroupsForCriterion(criterion)" :key="group.module" class="scrum-planner__module-group">
-                    <div class="scrum-planner__module-heading">
-                      <div class="scrum-planner__module-title"><q-icon name="layers" size="18px" /><strong>Module: {{ group.module }}</strong><span>{{ group.tasks.length }} tasks</span></div>
-                      <div class="scrum-planner__generated-heading"><q-icon name="list_alt" size="16px" /> Generated Tasks ({{ group.tasks.length }})</div>
+            <div class="scrum-planner__task-list scrum-plan-module-list" @dragover.prevent @drop="onScrumDropToBacklog">
+              <section v-for="group in scrumBacklogModuleGroups" :key="group.module" class="scrum-plan-module-card">
+                <button type="button" class="scrum-plan-module-header"
+                  :draggable="canPlanScrumModule(group.module)"
+                  :aria-label="`Expand or drag ${group.module} module to sprint`"
+                  :aria-expanded="scrumPlanningExpandedModules.includes(group.module)"
+                  @click="toggleScrumModule(group.module)"
+                  @dragstart.stop="onScrumModuleDragStart($event, group.module, 'backlog')"
+                  @dragend="clearScrumDrag()">
+                  <q-icon name="drag_indicator" size="19px" class="scrum-plan-module-drag-handle" />
+                  <q-icon name="layers" size="21px" color="indigo-8" />
+                  <span class="scrum-plan-module-name">{{ group.module }}</span>
+                  <span class="scrum-plan-module-count">{{ group.tasks.length }} task{{ group.tasks.length === 1 ? '' : 's' }}</span>
+                  <q-icon :name="scrumPlanningExpandedModules.includes(group.module) ? 'expand_less' : 'expand_more'" size="20px" color="grey-7" />
+                  <q-tooltip>{{ canPlanScrumModule(group.module) ? 'Drag to plan every unplanned task in this module' : 'Approve all module tasks and their dependencies before dragging' }}</q-tooltip>
+                </button>
+                <div v-if="scrumPlanningExpandedModules.includes(group.module)" class="scrum-plan-module-tasks">
+                  <article v-for="task in group.tasks" :key="task.id" class="scrum-plan-task-row"
+                    :draggable="canPlanScrumTask(task)" @dragstart.stop="onScrumDragStart($event, task.id)" @dragend="clearScrumDrag()">
+                    <span class="scrum-plan-task-code">{{ task.id }}</span>
+                    <div class="scrum-plan-task-copy">
+                      <strong>{{ task.title }}</strong>
+                      <span>{{ task.category }} · {{ task.points }} pts · {{ task.estimatedHours > 0 ? `${task.estimatedHours} hrs · ` : '' }}{{ task.priority }} priority</span>
+                      <span v-if="task.dependencies.length">Dependencies: {{ task.dependencies.join(', ') }}</span>
                     </div>
-                    <article v-for="task in group.tasks" :key="task.id" class="scrum-planner__trace-task-row"
-                      draggable="true" @dragstart="onScrumDragStart($event, task.id)" @dragend="scrumDraggingId = null">
-                      <button type="button" class="scrum-planner__trace-task-toggle"
-                        :aria-expanded="expandedScrumTaskId === task.id"
-                        :aria-controls="`scrum-task-detail-${task.id}`"
-                        @click="expandedScrumTaskId = expandedScrumTaskId === task.id ? null : task.id">
-                        <span class="scrum-planner__trace-task-code">{{ task.id }}</span>
-                        <span class="scrum-planner__trace-task-name">{{ task.title }}</span>
-                        <span class="scrum-planner__category" :class="`scrum-planner__category--${task.category.toLowerCase().replace('/', '-')}`">{{ task.category }}</span>
-                        <q-icon :name="expandedScrumTaskId === task.id ? 'expand_less' : 'expand_more'" size="18px" class="scrum-planner__trace-task-chevron" />
-                      </button>
-                      <div class="scrum-planner__trace-task-subtitle">
-                        <span>{{ task.sprintId !== null ? (scrumSprints.find(sprint => sprint.id === task.sprintId)?.name || 'Assigned to sprint') : 'Unplanned backlog' }}</span>
-                        <span>·</span>
-                        <span>{{ scrumReviewLabel(task.review) }}</span>
-                      </div>
-                      <div v-if="expandedScrumTaskId === task.id" :id="`scrum-task-detail-${task.id}`" class="scrum-planner__trace-task-details">
-                        <div class="scrum-planner__trace">
-                          <div><b>Task Code</b><span>{{ task.id }}</span></div>
-                          <div><b>Task Details</b><span>{{ task.description }}</span></div>
-                          <div><b>Dependencies</b><span>{{ task.dependencies.length ? task.dependencies.map(id => `${id}: ${scrumTasks.find(item => item.id === id)?.title || 'Unknown task'}`).join(', ') : 'None' }}</span></div>
-                          <div><b>Source Document</b><span>{{ task.source }}</span></div>
-                        </div>
-                        <div class="scrum-planner__task-bottom">
-                          <div class="scrum-planner__tags"><span><q-icon name="schedule" size="14px" /> {{ task.points }} pts</span><span>{{ task.priority }} priority</span></div>
-                          <span class="scrum-planner__review-state" :class="`is-${task.review}`">{{ scrumReviewLabel(task.review) }}</span>
-                        </div>
-                        <div class="scrum-planner__review-actions">
-                          <q-btn flat dense no-caps icon="check_circle_outline" label="Approve" color="positive" :disable="task.review === 'approved'" @click="task.review = 'approved'" />
-                          <q-btn flat dense no-caps icon="rate_review" label="Needs revision" color="orange-9" :disable="task.review === 'revision'" @click="task.review = 'revision'" />
-                          <q-btn v-if="task.sprintId === null" flat dense no-caps icon="add_circle_outline" label="Plan" color="indigo-9" :disable="!canPlanScrumTask(task)" @click="moveScrumTask(task.id, activeSprintId)" />
-                          <q-btn v-else flat dense no-caps icon="undo" label="Return to Backlog" color="indigo-9" @click="moveScrumTask(task.id, null)" />
-                        </div>
-                      </div>
-                    </article>
-                  </section>
+                    <q-btn flat dense round icon="info_outline" color="indigo-8" aria-label="View task details" @click="expandedScrumTaskId = expandedScrumTaskId === task.id ? null : task.id"><q-tooltip>Task details</q-tooltip></q-btn>
+                    <q-btn flat dense round icon="add_circle_outline" color="indigo-8" aria-label="Add task to sprint" :disable="!canPlanScrumTask(task)" @click="moveScrumTask(task.id, activeSprintId)"><q-tooltip>Plan in {{ activeScrumSprintName }}</q-tooltip></q-btn>
+                    <div v-if="expandedScrumTaskId === task.id" class="scrum-plan-task-details">
+                      <div>{{ task.description }}</div>
+                      <div><b>Dependencies:</b> {{ task.dependencies.length ? task.dependencies.join(', ') : 'None' }}</div>
+                    </div>
+                  </article>
                 </div>
-              </q-expansion-item>
-              <div v-if="scrumStoryCriteria.length === 0" class="scrum-planner__empty">No generated tasks linked to this story.</div>
+              </section>
+              <div v-if="scrumBacklogModuleGroups.length === 0" class="scrum-planner__empty">
+                <q-icon name="inventory_2" size="30px" />
+                <strong>No unplanned tasks match this category</strong>
+                <span>Try a different category, or return a task from the sprint backlog.</span>
+              </div>
             </div>
           </section>
         </div>
         <footer class="scrum-planner__footer">
           <span><q-icon name="cloud_off" size="17px" /> Demo planning session · Changes are not saved</span>
           <div><q-btn flat no-caps color="indigo-9" label="Close Preview" @click="scrumPlanningOpen = false" />
-            <q-btn unelevated no-caps color="indigo-9" icon="task_alt" label="Planning Preview Only" disable /></div>
+            <q-btn unelevated no-caps color="indigo-9" icon-right="arrow_forward" label="Proceed to Kanban" :disable="scheduledScrumTasks === 0" @click="openScrumKanban" />
+          </div>
+        </footer>
+      </q-card>
+    </q-dialog>
+
+    <!-- Step 4: Sprint execution Kanban; frontend-only until task status API is connected. -->
+    <q-dialog v-model="scrumKanbanOpen" persistent maximized transition-show="slide-up" transition-hide="slide-down">
+      <q-card class="scrum-kanban-page">
+        <header class="scrum-planner__header">
+          <div class="scrum-planner__identity">
+            <div class="scrum-planner__mark"><q-icon name="view_kanban" size="26px" /></div>
+            <div>
+              <div class="scrum-planner__eyebrow">ONE ICTMS / PROJECT DELIVERY</div>
+              <h2>Kanban Board</h2>
+              <p>Track planned sprint tasks from To Do through Done.</p>
+            </div>
+          </div>
+          <div class="scrum-planner__header-actions">
+            <q-btn flat no-caps color="white" icon="arrow_back" label="Back to Sprint Plan" @click="returnToScrumPlanningFromKanban" />
+            <q-badge class="scrum-planner__preview-badge">UI PREVIEW · NOT SAVED</q-badge>
+            <q-btn flat round icon="close" color="white" aria-label="Close Kanban board" @click="scrumKanbanOpen = false" />
+          </div>
+        </header>
+        <div class="scrum-kanban-toolbar">
+          <div class="scrum-kanban-toolbar__filters">
+            <q-select v-model="scrumKanbanSprintId" :options="scrumKanbanSprintOptions" label="Sprint" dense outlined emit-value map-options class="scrum-kanban-sprint" />
+            <div class="scrum-kanban-dates" aria-label="Selected sprint date range">
+              <q-icon name="date_range" size="20px" color="indigo-8" />
+              <div class="scrum-kanban-date"><span>START DATE</span><strong>{{ formatScrumKanbanDate(scrumKanbanSelectedSprint?.startDate) }}</strong></div>
+              <q-icon name="arrow_forward" size="16px" color="grey-6" class="scrum-kanban-date-arrow" />
+              <div class="scrum-kanban-date"><span>END DATE</span><strong>{{ formatScrumKanbanDate(scrumKanbanSelectedSprint?.endDate) }}</strong></div>
+            </div>
+            <q-select v-model="scrumKanbanCategory" :options="scrumCategoryFilters" label="Category" dense outlined class="scrum-kanban-category" />
+            <q-input v-model="scrumKanbanSearch" dense outlined clearable placeholder="Search task, module or assignee..." class="scrum-kanban-search">
+              <template #prepend><q-icon name="search" /></template>
+            </q-input>
+          </div>
+          <div class="scrum-kanban-toolbar__summary">
+            <strong>{{ scrumKanbanSprintTasks.length }} tasks</strong>
+            <span>{{ scrumKanbanCompletedCount }} done</span>
+            <span>{{ scrumKanbanSprintPoints }} story points</span>
+          </div>
+        </div>
+        <div class="scrum-kanban-board">
+          <section v-for="column in scrumKanbanColumns" :key="column.id" class="scrum-kanban-column"
+            :class="{ 'scrum-kanban-column--over': scrumKanbanHover === column.id }"
+            @dragover.prevent="scrumKanbanHover = column.id" @dragleave="scrumKanbanHover = null" @drop.prevent="onScrumKanbanDrop($event, column.id)">
+            <header class="scrum-kanban-column__head">
+              <div><span class="scrum-kanban-column__dot" :class="`scrum-kanban-column__dot--${column.id}`" /><strong>{{ column.label }}</strong></div>
+              <span class="scrum-kanban-column__count">{{ scrumKanbanTasksInColumn(column.id).length }}</span>
+            </header>
+            <div class="scrum-kanban-column__cards">
+              <article v-for="task in scrumKanbanTasksInColumn(column.id)" :key="task.id" class="scrum-kanban-task"
+                draggable="true" @dragstart="onScrumKanbanDragStart($event, task.id)" @dragend="scrumKanbanDraggingId = null">
+                <div class="scrum-kanban-task__top">
+                  <span class="scrum-plan-task-code">{{ task.id }}</span>
+                  <span class="scrum-kanban-task__priority">{{ task.priority }}</span>
+                </div>
+                <strong class="scrum-kanban-task__title">{{ task.title }}</strong>
+                <span class="scrum-kanban-task__module"><q-icon name="layers" size="14px" /> {{ task.module }}</span>
+                <div class="scrum-kanban-task__meta"><span>{{ task.category }}</span><span>{{ task.points }} pts{{ task.estimatedHours > 0 ? ` · ${task.estimatedHours} hrs` : '' }}</span></div>
+                <div v-if="task.dependencies.length" class="scrum-kanban-task__deps">Depends on: {{ task.dependencies.join(', ') }}</div>
+                <div class="scrum-kanban-task__footer">
+                  <span class="scrum-kanban-task__owner"><q-icon name="person_outline" size="16px" /> {{ scrumAssigneeFor(task.id)?.name || 'Unassigned' }}</span>
+                  <q-btn flat dense round icon="info_outline" color="indigo-8" :aria-label="`View ${task.id} details`" @click="openScrumKanbanTaskPreview(task)"><q-tooltip>View task details</q-tooltip></q-btn>
+                </div>
+              </article>
+              <div v-if="scrumKanbanTasksInColumn(column.id).length === 0" class="scrum-kanban-empty">Drop tasks here</div>
+            </div>
+          </section>
+        </div>
+        <footer class="scrum-planner__footer">
+          <span><q-icon name="cloud_off" size="17px" /> Kanban statuses are local to this session · Not saved</span>
+          <q-btn flat no-caps color="indigo-9" icon="arrow_back" label="Back to Sprint Plan" @click="returnToScrumPlanningFromKanban" />
+        </footer>
+      </q-card>
+    </q-dialog>
+    <!-- Step 2: stakeholder email invitation before sprint planning and task assignment. -->
+    <q-dialog v-model="scrumTeamAssignmentOpen" persistent maximized transition-show="slide-up" transition-hide="slide-down">
+      <q-card class="scrum-team-page">
+        <header class="scrum-planner__header">
+          <div class="scrum-planner__identity">
+            <div class="scrum-planner__mark"><q-icon name="groups" size="26px" /></div>
+            <div><div class="scrum-planner__eyebrow">ONE ICTMS / PROJECT DELIVERY</div>
+              <h2>Invite Stakeholders to Sprint Planning</h2>
+              <p>Invite assigned stakeholders to discuss sprint planning and task assignment on Google Meet.</p></div>
+          </div>
+          <div class="scrum-planner__header-actions">
+            <q-btn flat no-caps color="white" icon="arrow_back" label="Back to Task Review" @click="returnToReviewFromInvitation" />
+            <q-btn flat round icon="close" color="white" aria-label="Close team assignment" @click="scrumTeamAssignmentOpen = false" />
+          </div>
+        </header>
+        <div class="scrum-team-content">
+          <q-banner rounded class="bg-blue-1 text-indigo-9 q-mb-md">
+            Frontend preview: Stakeholders come from the System Registry. Removing an attendee affects this meeting only. Calendar invitations are not sent automatically.
+          </q-banner>
+          <div class="scrum-team-grid">
+            <section class="scrum-team-panel">
+              <div class="scrum-team-panel__head"><q-icon name="video_call" color="indigo-8" size="24px" /><strong>Google Meet Invitation</strong></div>
+              <q-select v-model="scrumMeetingSprintId" :options="scrumMeetingSprintOptions" label="Proposed sprint to discuss" outlined emit-value map-options />
+              <q-input v-model.trim="scrumMeetingTitle" outlined label="Meeting title" />
+              <div class="scrum-team-row"><q-input v-model="scrumMeetingDate" type="date" outlined stack-label label="Meeting date" class="col" />
+                <q-input v-model="scrumMeetingTime" type="time" outlined stack-label label="Start time" class="col" /></div>
+              <q-input v-model="scrumMeetingDuration" type="number" min="15" max="480" outlined label="Duration (minutes)" />
+              <q-input v-model.trim="scrumMeetingLink" outlined type="url" label="Google Meet link" placeholder="https://meet.google.com/abc-defg-hij" hint="Create a Google Meet, then paste its URL here." />
+              <div class="row q-gutter-sm">
+                <q-btn outline no-caps color="indigo-9" icon="video_call" label="Create Google Meet" @click="launchScrumGoogleMeet" />
+                <q-btn unelevated no-caps color="indigo-9" icon="event" label="Prepare Calendar Invitation" :disable="!scrumMeetingReady" @click="launchScrumCalendarInvite" />
+              </div>
+              <div class="text-caption text-grey-7">Agenda: review approved tasks, agree on sprint scope, and discuss task ownership. The Calendar invitation opens as a draft; send it manually.</div>
+            </section>
+            <section class="scrum-team-panel">
+              <div class="scrum-team-panel__head"><q-icon name="groups" color="indigo-8" size="24px" /><strong>System Stakeholders</strong><q-space />
+                <q-badge color="indigo-1" text-color="indigo-9">{{ scrumAttendees.length }} invited</q-badge></div>
+              <div class="text-caption text-grey-7">Only stakeholders assigned to this system are eligible. Remove anyone who should not receive this meeting invitation.</div>
+              <div v-if="!scrumRegistryStakeholders.length" class="text-grey-7 q-pa-md text-center">No assigned stakeholders found. Add stakeholders in the System Registry first.</div>
+              <section v-for="group in scrumStakeholdersByRole" :key="group.role" class="scrum-stakeholder-role-group">
+                <div class="scrum-stakeholder-role-header">
+                  <q-icon name="badge" color="indigo-8" size="20px" />
+                  <strong>{{ group.role }}</strong>
+                  <q-space />
+                  <q-badge color="indigo-1" text-color="indigo-9">{{ group.people.length }} {{ group.people.length === 1 ? 'member' : 'members' }}</q-badge>
+                </div>
+                <div v-for="person in group.people" :key="`${person.id}-${person.role}`" class="scrum-stakeholder-row">
+                  <q-avatar color="indigo-1" text-color="indigo-9" size="38px">{{ person.name.trim().slice(0, 1).toUpperCase() }}</q-avatar>
+                  <div class="scrum-stakeholder-details"><strong>{{ person.name }}</strong>
+                    <small :class="{ 'text-negative': !person.email }">{{ person.email || 'No email found — update the user directory to invite' }}</small></div>
+                  <q-chip v-if="person.email && scrumAttendees.includes(person.email)" dense color="green-1" text-color="green-9">Included</q-chip>
+                  <q-chip v-else-if="person.email" dense color="grey-2" text-color="grey-8">Excluded</q-chip>
+                  <q-btn v-if="person.email && scrumAttendees.includes(person.email)" round flat dense icon="person_remove" color="negative" :aria-label="`Remove ${person.name} from invitation`" @click="removeScrumAttendee(person.email)"><q-tooltip>Remove from invitation</q-tooltip></q-btn>
+                  <q-btn v-else-if="person.email" round flat dense icon="person_add" color="indigo-9" :aria-label="`Re-add ${person.name} to invitation`" @click="restoreScrumAttendee(person.email)"><q-tooltip>Re-add stakeholder</q-tooltip></q-btn>
+                </div>
+              </section>
+              <div v-if="!scrumAttendees.length" class="text-caption text-orange-9">Select at least one stakeholder with a valid email before preparing an invitation.</div>
+            </section>
+          </div>
+        </div>
+        <footer class="scrum-planner__footer">
+          <span><q-icon name="cloud_off" size="17px" /> Local preview · Invitations are not sent or saved</span>
+          <div><q-btn flat no-caps color="indigo-9" label="Back to Task Review" @click="returnToReviewFromInvitation" />
+            <q-btn unelevated no-caps color="indigo-9" icon="check_circle" label="Proceed to Scrum Planning" icon-right="arrow_forward" @click="continueToScrumPlanning" /></div>
         </footer>
       </q-card>
     </q-dialog>
@@ -1074,27 +1754,27 @@ type ScrumDemoTask = {
   id: string; source: ScrumSource; category: ScrumCategory
   userStory: string; acceptanceCriteria: string; module: string
   title: string; description: string; dependencies: string[]
-  points: number; priority: 'High' | 'Medium' | 'Low'
+  points: number; estimatedHours: number; priority: 'High' | 'Medium' | 'Low'
   review: ScrumReview; sprintId: number | null
 }
-type ScrumDemoSprint = { id: number; name: string }
+type ScrumDemoSprint = { id: number; name: string; startDate: string; endDate: string }
 // Illustrative tasks only: replace with API output based on the actual project documents.
 // Proposed implementation examples derived from Phase 1 LGBTQIA+ Public User user stories.
 // These are not actual AI output and are not extracted from BRD/SRS/SDD.
 const demoScrumTasks: ScrumDemoTask[] = [
-  { id: "DB-01", source: "User Stories", category: "DB", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "The feed must be automated; when a new Activity or News item is published in the backend, it must automatically push to the top of the Home Page.", module: "Latest Highlights", title: "Design highlight content schema", description: "Create content metadata and publication-status/date fields needed to order highlights.", dependencies: [], points: 3, priority: "High", review: "pending", sprintId: null },
-  { id: "BE-01", source: "User Stories", category: "Backend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "The feed must be automated; when a new Activity or News item is published in the backend, it must automatically push to the top of the Home Page.", module: "Latest Highlights", title: "Build latest highlights API", description: "Return newly published activities and news ordered by publication date, latest first.", dependencies: ["DB-01"], points: 5, priority: "High", review: "pending", sprintId: null },
-  { id: "FE-01", source: "User Stories", category: "Frontend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "The feed must be automated; when a new Activity or News item is published in the backend, it must automatically push to the top of the Home Page.", module: "Latest Highlights", title: "Connect home feed to published content", description: "Request published highlights and refresh the card list on page load.", dependencies: ["BE-01"], points: 3, priority: "High", review: "pending", sprintId: null },
-  { id: "UX-01", source: "User Stories", category: "UI/UX", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "Each post card must include a Category Tag (e.g., \"Event,\" \"Success Story\"), a Title, Description, Category, Date Published and a \"Share to Social Media\" option.", module: "Highlights Cards", title: "Design responsive highlight cards", description: "Design cards displaying category, title, description, publication date, and share action.", dependencies: [], points: 3, priority: "Medium", review: "pending", sprintId: null },
-  { id: "FE-02", source: "User Stories", category: "Frontend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "Each post card must include a Category Tag (e.g., \"Event,\" \"Success Story\"), a Title, Description, Category, Date Published and a \"Share to Social Media\" option.", module: "Highlights Cards", title: "Implement highlight cards and share controls", description: "Build reusable card components including the required metadata and social sharing affordance.", dependencies: ["UX-01", "FE-01"], points: 5, priority: "High", review: "pending", sprintId: null },
-  { id: "FE-03", source: "User Stories", category: "Frontend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "If a post contains a video, a \"Play\" icon must overlay the thumbnail.", module: "Highlights Media", title: "Render video play overlay", description: "Detect video highlights and render an accessible play control on the thumbnail.", dependencies: ["FE-02"], points: 2, priority: "High", review: "pending", sprintId: null },
-  { id: "FE-04", source: "User Stories", category: "Frontend", userStory: "US-02: As a Public User, I want to share LGBTQ-related highlights from the Home Page with others.", acceptanceCriteria: "Upon selection, the system automatically redirects and sends the content to the chosen platform", module: "Social Sharing", title: "Implement social-share redirect", description: "Open a supported sharing URL with the selected published highlight link.", dependencies: [], points: 3, priority: "High", review: "pending", sprintId: null },
-  { id: "UX-02", source: "User Stories", category: "UI/UX", userStory: "US-02: As a Public User, I want to share LGBTQ-related highlights from the Home Page with others.", acceptanceCriteria: "The system presents the option for Facebook.", module: "Social Sharing", title: "Design Facebook sharing option", description: "Define the share control behavior and accessible label for Facebook sharing.", dependencies: [], points: 2, priority: "Medium", review: "pending", sprintId: null },
-  { id: "FE-05", source: "User Stories", category: "Frontend", userStory: "US-02: As a Public User, I want to share LGBTQ-related highlights from the Home Page with others.", acceptanceCriteria: "The system presents the option for Facebook.", module: "Social Sharing", title: "Add Facebook sharing option", description: "Expose the Facebook choice and connect it to the sharing redirect.", dependencies: ["UX-02", "FE-04"], points: 2, priority: "High", review: "pending", sprintId: null },
-  { id: "FE-06", source: "User Stories", category: "Frontend", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "The text must support rich formatting (e.g., Bold, Italics, and Bullet points) to highlight key milestones.", module: "About Us", title: "Render formatted About Us content", description: "Support headings, bold, italic, and bullet lists in content display.", dependencies: [], points: 3, priority: "Medium", review: "pending", sprintId: null },
-  { id: "UX-03", source: "User Stories", category: "UI/UX", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "The Mission, Vision, Core Values, Organization History and Leadership Profile must be visually distinct (e.g., placed in a styled box or using specific headings).", module: "About Us", title: "Design About Us information layout", description: "Create distinct responsive sections for mission, vision, values, history, and leadership.", dependencies: [], points: 3, priority: "Medium", review: "pending", sprintId: null },
-  { id: "FE-07", source: "User Stories", category: "Frontend", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "The Mission, Vision, Core Values, Organization History and Leadership Profile must be visually distinct (e.g., placed in a styled box or using specific headings).", module: "About Us", title: "Implement About Us sections", description: "Build and style the five content sections with clear hierarchy.", dependencies: ["UX-03"], points: 3, priority: "High", review: "pending", sprintId: null },
-  { id: "FE-08", source: "User Stories", category: "Frontend", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "If a \"History\" image or brand photo is included, it must be responsive and centered.", module: "About Us Media", title: "Implement responsive history image", description: "Center optional images and provide responsive sizing and alternate text.", dependencies: ["FE-07"], points: 2, priority: "Medium", review: "pending", sprintId: null },
+  { id: "DB-01", source: "User Stories", category: "DB", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "The feed must be automated; when a new Activity or News item is published in the backend, it must automatically push to the top of the Home Page.", module: "Latest Highlights", title: "Design highlight content schema", description: "Create content metadata and publication-status/date fields needed to order highlights.", dependencies: [], points: 3, estimatedHours: 0, priority: "High", review: "pending", sprintId: null },
+  { id: "BE-01", source: "User Stories", category: "Backend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "The feed must be automated; when a new Activity or News item is published in the backend, it must automatically push to the top of the Home Page.", module: "Latest Highlights", title: "Build latest highlights API", description: "Return newly published activities and news ordered by publication date, latest first.", dependencies: ["DB-01"], points: 5, estimatedHours: 0, priority: "High", review: "pending", sprintId: null },
+  { id: "FE-01", source: "User Stories", category: "Frontend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "The feed must be automated; when a new Activity or News item is published in the backend, it must automatically push to the top of the Home Page.", module: "Latest Highlights", title: "Connect home feed to published content", description: "Request published highlights and refresh the card list on page load.", dependencies: ["BE-01"], points: 3, estimatedHours: 0, priority: "High", review: "pending", sprintId: null },
+  { id: "UX-01", source: "User Stories", category: "UI/UX", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "Each post card must include a Category Tag (e.g., \"Event,\" \"Success Story\"), a Title, Description, Category, Date Published and a \"Share to Social Media\" option.", module: "Highlights Cards", title: "Design responsive highlight cards", description: "Design cards displaying category, title, description, publication date, and share action.", dependencies: [], points: 3, estimatedHours: 0, priority: "Medium", review: "pending", sprintId: null },
+  { id: "FE-02", source: "User Stories", category: "Frontend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "Each post card must include a Category Tag (e.g., \"Event,\" \"Success Story\"), a Title, Description, Category, Date Published and a \"Share to Social Media\" option.", module: "Highlights Cards", title: "Implement highlight cards and share controls", description: "Build reusable card components including the required metadata and social sharing affordance.", dependencies: ["UX-01", "FE-01"], points: 5, estimatedHours: 0, priority: "High", review: "pending", sprintId: null },
+  { id: "FE-03", source: "User Stories", category: "Frontend", userStory: "US-01: As a Public User, I want to see a dynamic \"Latest Highlights\" feed on the landing page, so that I can immediately see the organization's active impact.", acceptanceCriteria: "If a post contains a video, a \"Play\" icon must overlay the thumbnail.", module: "Highlights Media", title: "Render video play overlay", description: "Detect video highlights and render an accessible play control on the thumbnail.", dependencies: ["FE-02"], points: 2, estimatedHours: 0, priority: "High", review: "pending", sprintId: null },
+  { id: "FE-04", source: "User Stories", category: "Frontend", userStory: "US-02: As a Public User, I want to share LGBTQ-related highlights from the Home Page with others.", acceptanceCriteria: "Upon selection, the system automatically redirects and sends the content to the chosen platform", module: "Social Sharing", title: "Implement social-share redirect", description: "Open a supported sharing URL with the selected published highlight link.", dependencies: [], points: 3, estimatedHours: 0, priority: "High", review: "pending", sprintId: null },
+  { id: "UX-02", source: "User Stories", category: "UI/UX", userStory: "US-02: As a Public User, I want to share LGBTQ-related highlights from the Home Page with others.", acceptanceCriteria: "The system presents the option for Facebook.", module: "Social Sharing", title: "Design Facebook sharing option", description: "Define the share control behavior and accessible label for Facebook sharing.", dependencies: [], points: 2, estimatedHours: 0, priority: "Medium", review: "pending", sprintId: null },
+  { id: "FE-05", source: "User Stories", category: "Frontend", userStory: "US-02: As a Public User, I want to share LGBTQ-related highlights from the Home Page with others.", acceptanceCriteria: "The system presents the option for Facebook.", module: "Social Sharing", title: "Add Facebook sharing option", description: "Expose the Facebook choice and connect it to the sharing redirect.", dependencies: ["UX-02", "FE-04"], points: 2, estimatedHours: 0, priority: "High", review: "pending", sprintId: null },
+  { id: "FE-06", source: "User Stories", category: "Frontend", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "The text must support rich formatting (e.g., Bold, Italics, and Bullet points) to highlight key milestones.", module: "About Us", title: "Render formatted About Us content", description: "Support headings, bold, italic, and bullet lists in content display.", dependencies: [], points: 3, estimatedHours: 0, priority: "Medium", review: "pending", sprintId: null },
+  { id: "UX-03", source: "User Stories", category: "UI/UX", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "The Mission, Vision, Core Values, Organization History and Leadership Profile must be visually distinct (e.g., placed in a styled box or using specific headings).", module: "About Us", title: "Design About Us information layout", description: "Create distinct responsive sections for mission, vision, values, history, and leadership.", dependencies: [], points: 3, estimatedHours: 0, priority: "Medium", review: "pending", sprintId: null },
+  { id: "FE-07", source: "User Stories", category: "Frontend", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "The Mission, Vision, Core Values, Organization History and Leadership Profile must be visually distinct (e.g., placed in a styled box or using specific headings).", module: "About Us", title: "Implement About Us sections", description: "Build and style the five content sections with clear hierarchy.", dependencies: ["UX-03"], points: 3, estimatedHours: 0, priority: "High", review: "pending", sprintId: null },
+  { id: "FE-08", source: "User Stories", category: "Frontend", userStory: "US-03: As a Public User, I want to read the organizational background so that I can understand its history, core values, vision and mission, and leadership.", acceptanceCriteria: "If a \"History\" image or brand photo is included, it must be responsive and centered.", module: "About Us Media", title: "Implement responsive history image", description: "Center optional images and provide responsive sizing and alternate text.", dependencies: ["FE-07"], points: 2, estimatedHours: 0, priority: "Medium", review: "pending", sprintId: null },
 ]
 const scrumAcknowledgementOpen = ref(false)
 const scrumExecutionAcknowledged = ref(false)
@@ -1115,61 +1795,820 @@ function cancelScrumExecution(): void {
 function confirmScrumExecution(): void {
   if (!scrumExecutionAcknowledged.value) return
   scrumAcknowledgementOpen.value = false
-  openScrumPlanning()
+  openScrumTaskReview()
 }
 const scrumPlanningOpen = ref(false)
 const scrumTasks = ref<ScrumDemoTask[]>([])
-const scrumSprints = ref<ScrumDemoSprint[]>([{ id: 1, name: 'Sprint 1' }, { id: 2, name: 'Sprint 2' }])
+const scrumTaskReviewOpen = ref(false)
+const scrumEditTaskOpen = ref(false)
+const scrumTaskDraft = ref<ScrumDemoTask | null>(null)
+const scrumCreatingTask = ref(false)
+const scrumReviewTab = ref<'stories' | 'modules'>('stories')
+// Draft requirement catalogs are separate from tasks; empty records remain visible.
+const scrumStoryCatalog = ref<string[]>([])
+const scrumCriteriaCatalog = ref<Record<string, string[]>>({})
+const scrumModuleCatalog = ref<string[]>([])
+type ScrumModuleInfo = { code: string; description: string; status: 'Draft' | 'Under Review' | 'Approved'; story: string | null; criterion: string | null }
+const scrumModuleInfo = ref<Record<string, ScrumModuleInfo>>({})
+// Separate creation dialogs match the User Story and Module forms in the requirements review.
+const scrumStoryCreateOpen = ref(false)
+const scrumStoryCreateError = ref('')
+const scrumNewStoryTitle = ref('')
+const scrumNewStoryRole = ref('')
+const scrumNewStoryGoal = ref('')
+const scrumNewStoryBenefit = ref('')
+const scrumNewStoryCriteria = ref<string[]>([''])
+const scrumNewStoryPreview = computed(() => `As a ${scrumNewStoryRole.value.trim() || '[user role]'}, I want to ${scrumNewStoryGoal.value.trim() || '[goal]'} so that ${scrumNewStoryBenefit.value.trim() || '[benefit]'}.`)
+function resetScrumStoryCreator(): void {
+  scrumStoryCreateError.value = ''
+  scrumNewStoryTitle.value = ''
+  scrumNewStoryRole.value = ''
+  scrumNewStoryGoal.value = ''
+  scrumNewStoryBenefit.value = ''
+  scrumNewStoryCriteria.value = ['']
+}
+function openScrumStoryCreator(): void {
+  resetScrumStoryCreator()
+  scrumStoryCreateOpen.value = true
+}
+function saveScrumStoryCreator(): void {
+  const title = scrumNewStoryTitle.value.trim()
+  const role = scrumNewStoryRole.value.trim()
+  const goal = scrumNewStoryGoal.value.trim().replace(/[.\s]+$/, '')
+  const benefit = scrumNewStoryBenefit.value.trim().replace(/[.\s]+$/, '')
+  const criteria = scrumNewStoryCriteria.value.map(value => value.trim()).filter(Boolean)
+  if (!title || !role || !goal || !benefit) { scrumStoryCreateError.value = 'Complete all required User Story fields.'; return }
+  if (!criteria.length || criteria.length !== scrumNewStoryCriteria.value.length) { scrumStoryCreateError.value = 'Complete each acceptance criterion.'; return }
+  if (new Set(criteria.map(c => c.toLowerCase())).size !== criteria.length) { scrumStoryCreateError.value = 'Acceptance criteria must be unique.'; return }
+  const story = `As a ${role}, I want to ${goal} so that ${benefit}.`
+  if (scrumStoryCatalog.value.includes(story)) { scrumStoryCreateError.value = 'This user story already exists.'; return }
+  scrumStoryCatalog.value.push(story)
+  scrumCriteriaCatalog.value[story] = criteria
+  scrumReviewTab.value = 'stories'
+  scrumStoryCreateOpen.value = false
+}
+
+const scrumModuleCreateOpen = ref(false)
+const scrumUnifiedError = ref('')
+const scrumUnifiedExistingStory = ref<string | null>(null)
+const scrumUnifiedExistingCriterion = ref<string | null>(null)
+const scrumUnifiedCriterionOptions = computed(() => scrumCriteriaCatalog.value[scrumUnifiedExistingStory.value ?? ''] ?? [])
+const scrumUnifiedNewModule = ref('')
+const scrumUnifiedModuleCode = ref('')
+const scrumUnifiedModuleDescription = ref('')
+const scrumUnifiedModuleStatus = ref<ScrumModuleInfo['status']>('Draft')
+const scrumUnifiedAddTask = ref(false)
+const scrumUnifiedTaskTitle = ref('')
+const scrumUnifiedTaskCategory = ref<ScrumCategory>('Frontend')
+const scrumUnifiedTaskPriority = ref<ScrumDemoTask['priority']>('Medium')
+const scrumUnifiedTaskDescription = ref('')
+const scrumUnifiedTaskPoints = ref(3)
+const scrumUnifiedTaskEstimatedHours = ref(0)
+const scrumUnifiedTaskDependencies = ref<string[]>([])
+function resetScrumModuleCreator(): void {
+  scrumUnifiedError.value = ''
+  scrumUnifiedExistingStory.value = null
+  scrumUnifiedExistingCriterion.value = null
+  scrumUnifiedNewModule.value = ''
+  scrumUnifiedModuleCode.value = ''
+  scrumUnifiedModuleDescription.value = ''
+  scrumUnifiedModuleStatus.value = 'Draft'
+  scrumUnifiedAddTask.value = false
+  scrumUnifiedTaskTitle.value = ''
+  scrumUnifiedTaskCategory.value = 'Frontend'
+  scrumUnifiedTaskPriority.value = 'Medium'
+  scrumUnifiedTaskDescription.value = ''
+  scrumUnifiedTaskPoints.value = 3
+  scrumUnifiedTaskEstimatedHours.value = 0
+  scrumUnifiedTaskDependencies.value = []
+}
+function openScrumModuleCreator(): void {
+  resetScrumModuleCreator()
+  scrumModuleCreateOpen.value = true
+}
+function saveScrumModuleCreator(): void {
+  const moduleName = scrumUnifiedNewModule.value.trim()
+  const code = scrumUnifiedModuleCode.value.trim()
+  const description = scrumUnifiedModuleDescription.value.trim()
+  const story = scrumUnifiedExistingStory.value
+  const criterion = scrumUnifiedExistingCriterion.value
+  if (!moduleName || !description) { scrumUnifiedError.value = 'Module name and description are required.'; return }
+  if (scrumModuleCatalog.value.some(item => item.toLowerCase() === moduleName.toLowerCase())) { scrumUnifiedError.value = 'This module already exists.'; return }
+  if (code && Object.values(scrumModuleInfo.value).some(info => info.code.toLowerCase() === code.toLowerCase())) { scrumUnifiedError.value = 'Module code already exists.'; return }
+  if (story && !scrumStoryCatalog.value.includes(story)) { scrumUnifiedError.value = 'Choose a valid User Story.'; return }
+  if (criterion && (!story || !(scrumCriteriaCatalog.value[story] ?? []).includes(criterion))) { scrumUnifiedError.value = 'Choose an acceptance criterion from the selected User Story.'; return }
+  if (scrumUnifiedAddTask.value) {
+    if (!story || !criterion) { scrumUnifiedError.value = 'Link a User Story and Acceptance Criterion before adding a task.'; return }
+    if (!scrumUnifiedTaskTitle.value.trim() || !scrumUnifiedTaskDescription.value.trim() || !Number.isFinite(scrumUnifiedTaskPoints.value) || scrumUnifiedTaskPoints.value < 1 || scrumUnifiedTaskPoints.value > 100) { scrumUnifiedError.value = 'Complete task title, details, and valid story points.'; return }
+    if (!Number.isFinite(scrumUnifiedTaskEstimatedHours.value) || scrumUnifiedTaskEstimatedHours.value < 0) { scrumUnifiedError.value = 'Estimated hours must be zero or greater.'; return }
+    if (scrumUnifiedTaskDependencies.value.some(id => !scrumTasks.value.some(task => task.id === id))) { scrumUnifiedError.value = 'A task dependency no longer exists.'; return }
+  }
+  scrumModuleCatalog.value.push(moduleName)
+  scrumModuleInfo.value[moduleName] = { code, description, status: scrumUnifiedModuleStatus.value, story, criterion }
+  scrumExpandedModules.value[moduleName] = true
+  if (scrumUnifiedAddTask.value && story && criterion) {
+    const ids = new Set(scrumTasks.value.map(task => task.id))
+    let number = 1
+    while (ids.has(`TASK-${String(number).padStart(3, '0')}`)) number++
+    scrumTasks.value.push({
+      id: `TASK-${String(number).padStart(3, '0')}`, source: 'User Stories',
+      category: scrumUnifiedTaskCategory.value, userStory: story, acceptanceCriteria: criterion,
+      module: moduleName, title: scrumUnifiedTaskTitle.value.trim(), description: scrumUnifiedTaskDescription.value.trim(),
+      dependencies: [...scrumUnifiedTaskDependencies.value], points: scrumUnifiedTaskPoints.value, estimatedHours: scrumUnifiedTaskEstimatedHours.value,
+      priority: scrumUnifiedTaskPriority.value, review: 'pending', sprintId: null,
+    })
+  }
+  scrumReviewTab.value = 'modules'
+  scrumModuleCreateOpen.value = false
+}
+
+type ScrumTaskComment = { id: number; author: string; html: string; createdAt: string; reactions: string[] }
+type ScrumTaskAttachment = { id: number; file: File }
+const scrumTaskComments = ref<Record<string, ScrumTaskComment[]>>({})
+const scrumTaskAttachments = ref<Record<string, ScrumTaskAttachment[]>>({})
+const scrumCommentEmojis = ['😀', '😃', '😂', '😊', '😍', '🤔', '😮', '😢', '🔥', '🎉', '👍', '👎', '❤️', '👏', '✅', '🚀', '💯', '👀']
+const scrumCommentReactions = ['👍', '❤️', '🎉', '😂', '👀']
+const scrumCommentDraft = ref('')
+const scrumCommentEditor = ref<{ runCmd: (command: string, argument?: string) => void } | null>(null)
+let scrumCollabId = 0
+const formatScrumCommentDate = (value: string): string => new Date(value).toLocaleString()
+const formatScrumFileSize = (size: number): string => size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`
+
+// Render only known formatting elements. Reject scripts, event handlers, remote images and unsafe URLs.
+function sanitizeScrumCommentHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const allowed = new Set(['P', 'DIV', 'BR', 'B', 'STRONG', 'EM', 'I', 'U', 'S', 'STRIKE', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'A', 'IMG'])
+  const prohibited = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'SVG', 'MATH', 'FORM', 'INPUT', 'VIDEO', 'AUDIO'])
+  const safe = document.createElement('div')
+  function copyChildren(source: Node, target: Node): void {
+    for (const node of Array.from(source.childNodes)) {
+      if (node.nodeType === Node.TEXT_NODE) { target.appendChild(document.createTextNode(node.textContent || '')); continue }
+      if (node.nodeType !== Node.ELEMENT_NODE) continue
+      const element = node as Element
+      if (prohibited.has(element.tagName)) continue
+      if (!allowed.has(element.tagName)) { copyChildren(element, target); continue }
+      const next = document.createElement(element.tagName.toLowerCase())
+      if (element.tagName === 'IMG') {
+        const src = element.getAttribute('src') || ''
+        if (!/^data:image\/(png|jpeg|gif|webp);base64,[a-zA-Z0-9+/=]+$/.test(src) || src.length > 3_000_000) continue
+        next.setAttribute('src', src)
+        next.setAttribute('alt', 'Pasted comment image')
+      }
+      if (element.tagName === 'A') {
+        const href = element.getAttribute('href') || ''
+        if (/^https?:\/\//i.test(href)) { next.setAttribute('href', href); next.setAttribute('target', '_blank'); next.setAttribute('rel', 'noopener noreferrer') }
+      }
+      copyChildren(element, next)
+      target.appendChild(next)
+    }
+  }
+  copyChildren(doc.body, safe)
+  return safe.innerHTML
+}
+const scrumCommentHasContent = computed(() => {
+  const safe = sanitizeScrumCommentHtml(scrumCommentDraft.value)
+  const doc = new DOMParser().parseFromString(safe, 'text/html')
+  return Boolean(doc.body.textContent?.trim() || doc.body.querySelector('img'))
+})
+function onScrumCommentPaste(event: ClipboardEvent): void {
+  const file = Array.from(event.clipboardData?.items || []).find(item => item.type.startsWith('image/'))?.getAsFile()
+  if (!file) return
+  event.preventDefault()
+  if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) {
+    $q.notify({ type: 'warning', message: 'Paste a PNG, JPG, GIF or WebP image smaller than 2 MB.' })
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => {
+    if (typeof reader.result !== 'string') return
+    scrumCommentEditor.value?.runCmd('insertHTML', `<img src="${reader.result}" alt="Pasted comment image">`)
+  }
+  reader.readAsDataURL(file)
+}
+function insertScrumCommentEmoji(emoji: string): void {
+  if (!scrumCommentEmojis.includes(emoji)) return
+  // QEditor handles insertion at the editor selection when available.
+  if (scrumCommentEditor.value) scrumCommentEditor.value.runCmd('insertHTML', emoji)
+  else scrumCommentDraft.value += emoji
+}
+function toggleScrumCommentReaction(taskId: string, commentId: number, emoji: string): void {
+  if (!scrumCommentReactions.includes(emoji)) return
+  const comment = scrumTaskComments.value[taskId]?.find(item => item.id === commentId)
+  if (!comment) return
+  comment.reactions = comment.reactions.includes(emoji)
+    ? comment.reactions.filter(item => item !== emoji)
+    : [...comment.reactions, emoji]
+}
+function addScrumComment(taskId: string): void {
+  const html = sanitizeScrumCommentHtml(scrumCommentDraft.value)
+  if (!scrumCommentHasContent.value) return
+  scrumTaskComments.value[taskId] ??= []
+  scrumTaskComments.value[taskId].push({ id: ++scrumCollabId, author: 'Current reviewer', html, createdAt: new Date().toISOString(), reactions: [] })
+  scrumCommentDraft.value = ''
+}
+function removeScrumComment(taskId: string, commentId: number): void {
+  scrumTaskComments.value[taskId] = (scrumTaskComments.value[taskId] || []).filter(item => item.id !== commentId)
+}
+function onScrumFilesSelected(event: Event, taskId: string): void {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  const rejected = files.filter(file => file.size > 10 * 1024 * 1024)
+  if (rejected.length) $q.notify({ type: 'warning', message: `${rejected.length} file(s) exceed the 10 MB limit.` })
+  scrumTaskAttachments.value[taskId] ??= []
+  for (const file of files.filter(item => item.size <= 10 * 1024 * 1024)) {
+    scrumTaskAttachments.value[taskId].push({ id: ++scrumCollabId, file })
+  }
+  input.value = ''
+}
+function removeScrumAttachment(taskId: string, attachmentId: number): void {
+  scrumTaskAttachments.value[taskId] = (scrumTaskAttachments.value[taskId] || []).filter(item => item.id !== attachmentId)
+}
+function downloadScrumAttachment(file: File): void {
+  const url = URL.createObjectURL(file)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = file.name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+const scrumPreviewTab = ref<'details' | 'technical' | 'dependencies' | 'comments' | 'attachments' | 'activity'>('details')
+function openScrumPreviewKanban(task: ScrumDemoTask): void {
+  if (task.sprintId === null) return
+  scrumKanbanSprintId.value = task.sprintId
+  scrumViewOpen.value = false
+  scrumKanbanOpen.value = true
+}
+const scrumViewOpen = ref(false)
+const scrumPreviewOrigin = ref<'review' | 'kanban'>('review')
+function openScrumKanbanTaskPreview(task: ScrumDemoTask): void {
+  scrumPreviewOrigin.value = 'kanban'
+  viewScrumGeneratedTask(task)
+}
+const scrumViewTaskId = ref<string | null>(null)
+const scrumViewStory = ref('')
+const scrumViewCriterion = ref('')
+// Resolve by ID so details stay in sync if the task is edited while the dialog is open.
+const scrumViewTask = computed(() => scrumTasks.value.find(task => task.id === scrumViewTaskId.value) ?? null)
+const scrumViewPredecessorTasks = computed(() => scrumTasks.value.filter(task => scrumViewTask.value?.dependencies.includes(task.id)))
+const scrumViewSuccessorTasks = computed(() => scrumTasks.value.filter(task => scrumViewTask.value !== null && task.dependencies.includes(scrumViewTaskId.value ?? '')))
+function viewScrumGeneratedTask(task: ScrumDemoTask): void {
+  scrumViewTaskId.value = task.id
+  scrumCommentDraft.value = ''
+  scrumPreviewTab.value = 'details'
+  scrumViewOpen.value = true
+}
+function viewScrumCriterion(story: string, criterion: string): void {
+  scrumViewTaskId.value = null
+  scrumViewStory.value = story
+  scrumViewCriterion.value = criterion
+  scrumViewOpen.value = true
+}
+function removeScrumTasks(ids: string[]): void {
+  const removed = new Set(ids)
+  if (!removed.size) return
+  // Dependent tasks remain in the backlog, but must be re-reviewed without invalid links.
+  const visited = new Set<string>()
+  for (const id of removed) invalidateScrumDependents(id, visited)
+  scrumTasks.value = scrumTasks.value.filter(task => !removed.has(task.id))
+  for (const task of scrumTasks.value) {
+    if (task.dependencies.some(id => removed.has(id))) {
+      task.dependencies = task.dependencies.filter(id => !removed.has(id))
+      task.review = 'pending'
+      task.sprintId = null
+    }
+  }
+  if (scrumViewTaskId.value && removed.has(scrumViewTaskId.value)) scrumViewOpen.value = false
+}
+function confirmRemoveScrumTask(task: ScrumDemoTask): void {
+  const dependents = scrumTasks.value.filter(item => item.dependencies.includes(task.id))
+  $q.dialog({
+    title: `Remove ${task.id}?`,
+    message: `Remove "${task.title}"?${dependents.length ? ` ${dependents.length} dependent task(s) will return to Pending Review and lose this dependency.` : ''} This cannot be undone in this preview.`,
+    cancel: true,
+    persistent: true,
+    ok: { label: 'Remove Task', color: 'negative', unelevated: true },
+  }).onOk(() => removeScrumTasks([task.id]))
+}
+function confirmRemoveScrumCriterion(story: string, criterion: string): void {
+  const tasks = scrumTasks.value.filter(task => task.userStory === story && task.acceptanceCriteria === criterion)
+  $q.dialog({
+    title: 'Remove acceptance criterion?',
+    message: `Remove this criterion and its ${tasks.length} linked task(s)? Other tasks depending on them will return to Pending Review. This cannot be undone in this preview.`,
+    cancel: true,
+    persistent: true,
+    ok: { label: 'Remove Criterion', color: 'negative', unelevated: true },
+  }).onOk(() => {
+    removeScrumTasks(tasks.map(task => task.id))
+    scrumCriteriaCatalog.value[story] = (scrumCriteriaCatalog.value[story] ?? []).filter(item => item !== criterion)
+  })
+}
+
+const scrumRequirementEditorOpen = ref(false)
+const scrumRequirementKind = ref<'story' | 'criterion' | 'module'>('story')
+const scrumRequirementOriginal = ref('')
+const scrumRequirementParent = ref('')
+const scrumRequirementDraft = ref('')
+const scrumRequirementError = ref('')
+// UI-only collapse state; task records and review decisions are not changed by hiding.
+const scrumHiddenCriterionTasks = ref<string[]>([])
+function scrumCriterionKey(story: string, criterion: string): string {
+  return JSON.stringify([story, criterion])
+}
+function scrumCriterionTasksHidden(story: string, criterion: string): boolean {
+  return scrumHiddenCriterionTasks.value.includes(scrumCriterionKey(story, criterion))
+}
+function toggleScrumCriterionTasks(story: string, criterion: string): void {
+  const key = scrumCriterionKey(story, criterion)
+  scrumHiddenCriterionTasks.value = scrumCriterionTasksHidden(story, criterion)
+    ? scrumHiddenCriterionTasks.value.filter(item => item !== key)
+    : [...scrumHiddenCriterionTasks.value, key]
+}
+const scrumReviewSearch = ref('')
+const scrumReviewCategoryFilter = ref('All Categories')
+const scrumReviewStatusFilter = ref('All Statuses')
+const scrumEditTaskError = ref('')
+const scrumReviewStatusOptions = ['All Statuses', 'Pending review', 'Approved', 'Needs revision']
+const scrumExpandedModules = ref<Record<string, boolean>>({})
+function clearScrumReviewFilters(): void {
+  scrumReviewSearch.value = ''
+  scrumReviewStatusFilter.value = 'All Statuses'
+  scrumReviewCategoryFilter.value = 'All Categories'
+}
+function setAllScrumModulesExpanded(expanded: boolean): void {
+  scrumExpandedModules.value = Object.fromEntries(scrumReviewModules.value.map(name => [name, expanded]))
+}
+watch([scrumReviewTab, scrumReviewCategoryFilter], () => {
+  if (scrumReviewTab.value !== 'modules') return
+  const first = scrumReviewModules.value[0]
+  scrumExpandedModules.value = first ? { [first]: true } : {}
+})
+const approvedScrumTasks = computed(() => scrumTasks.value.filter(task => task.review === 'approved').length)
+const pendingScrumTasks = computed(() => scrumTasks.value.filter(task => task.review === 'pending').length)
+const revisionScrumTasks = computed(() => scrumTasks.value.filter(task => task.review === 'revision').length)
+const scrumReviewComplete = computed(() => scrumTasks.value.length > 0 && scrumTasks.value.every(task => canPlanScrumTask(task)))
+const scrumReviewVisibleTasks = computed(() => scrumTasks.value.filter(task => {
+  const query = scrumReviewSearch.value.trim().toLowerCase()
+  return (!query || [task.id, task.title, task.module, task.userStory, task.acceptanceCriteria].some(value => value.toLowerCase().includes(query)))
+    && (scrumReviewCategoryFilter.value === 'All Categories' || task.category === scrumReviewCategoryFilter.value)
+    && (scrumReviewStatusFilter.value === 'All Statuses' || scrumReviewLabel(task.review) === scrumReviewStatusFilter.value)
+}))
+const scrumReviewStories = computed(() => scrumReviewSearch.value.trim() || scrumReviewStatusFilter.value !== 'All Statuses' || scrumReviewCategoryFilter.value !== 'All Categories'
+  ? scrumStoryCatalog.value.filter(story => scrumReviewVisibleTasks.value.some(task => task.userStory === story))
+  : scrumStoryCatalog.value)
+function scrumReviewCriteria(story: string): string[] {
+  const entries = scrumCriteriaCatalog.value[story] ?? []
+  return scrumReviewSearch.value.trim() || scrumReviewStatusFilter.value !== 'All Statuses' || scrumReviewCategoryFilter.value !== 'All Categories'
+    ? entries.filter(criterion => scrumReviewVisibleTasks.value.some(task => task.userStory === story && task.acceptanceCriteria === criterion))
+    : entries
+}
+function scrumReviewTasksFor(story: string, criterion: string): ScrumDemoTask[] {
+  return scrumReviewVisibleTasks.value.filter(task => task.userStory === story && task.acceptanceCriteria === criterion)
+}
+const scrumReviewModules = computed(() => scrumReviewSearch.value.trim() || scrumReviewStatusFilter.value !== 'All Statuses' || scrumReviewCategoryFilter.value !== 'All Categories'
+  ? scrumModuleCatalog.value.filter(module => scrumReviewVisibleTasks.value.some(task => task.module === module))
+  : scrumModuleCatalog.value)
+function scrumReviewModuleTasks(moduleName: string): ScrumDemoTask[] {
+  return scrumReviewVisibleTasks.value.filter(task => task.module === moduleName)
+}
+function openScrumRequirementEditor(kind: 'story' | 'criterion' | 'module', value: string, parent = ''): void {
+  scrumRequirementKind.value = kind
+  scrumRequirementOriginal.value = value
+  scrumRequirementParent.value = parent
+  scrumRequirementDraft.value = value
+  scrumRequirementError.value = ''
+  scrumRequirementEditorOpen.value = true
+}
+function saveScrumRequirement(): void {
+  const next = scrumRequirementDraft.value.trim()
+  const previous = scrumRequirementOriginal.value
+  const kind = scrumRequirementKind.value
+  if (!next) {
+    scrumRequirementError.value = 'This field is required.'
+    return
+  }
+  if (next === previous) {
+    scrumRequirementEditorOpen.value = false
+    return
+  }
+  const collision = kind === 'story'
+    ? scrumStoryCatalog.value.includes(next)
+    : kind === 'module'
+      ? scrumModuleCatalog.value.includes(next)
+      : (scrumCriteriaCatalog.value[scrumRequirementParent.value] ?? []).includes(next)
+  if (collision) {
+    scrumRequirementError.value = 'This name already exists. Choose a different name.'
+    return
+  }
+  const affected = scrumTasks.value.filter(task => kind === 'story'
+    ? task.userStory === previous
+    : kind === 'module'
+      ? task.module === previous
+      : task.userStory === scrumRequirementParent.value && task.acceptanceCriteria === previous)
+  for (const task of affected) {
+    if (kind === 'story') task.userStory = next
+    else if (kind === 'module') task.module = next
+    else task.acceptanceCriteria = next
+    task.review = 'pending'
+    task.sprintId = null
+    invalidateScrumDependents(task.id)
+  }
+  if (kind === 'story') {
+    scrumStoryCatalog.value = scrumStoryCatalog.value.map(item => item === previous ? next : item)
+    scrumCriteriaCatalog.value[next] = scrumCriteriaCatalog.value[previous] ?? []
+    delete scrumCriteriaCatalog.value[previous]
+  } else if (kind === 'module') {
+    scrumModuleCatalog.value = scrumModuleCatalog.value.map(item => item === previous ? next : item)
+    if (scrumModuleInfo.value[previous]) { scrumModuleInfo.value[next] = scrumModuleInfo.value[previous]; delete scrumModuleInfo.value[previous] }
+    scrumExpandedModules.value[next] = scrumExpandedModules.value[previous] ?? true
+    delete scrumExpandedModules.value[previous]
+  } else {
+    scrumCriteriaCatalog.value[scrumRequirementParent.value] = (scrumCriteriaCatalog.value[scrumRequirementParent.value] ?? [])
+      .map(item => item === previous ? next : item)
+  }
+  scrumRequirementEditorOpen.value = false
+}
+function openScrumTaskReview(): void {
+  scrumCreatingTask.value = false
+  scrumTasks.value = demoScrumTasks.map(task => ({ ...task, dependencies: [...task.dependencies] }))
+  scrumKanbanStatuses.value = {}
+  scrumStoryCatalog.value = [...new Set(scrumTasks.value.map(task => task.userStory))]
+  scrumCriteriaCatalog.value = Object.fromEntries(scrumStoryCatalog.value.map(story => [story,
+    [...new Set(scrumTasks.value.filter(task => task.userStory === story).map(task => task.acceptanceCriteria))]]))
+  scrumModuleCatalog.value = [...new Set(scrumTasks.value.map(task => task.module))]
+  scrumModuleInfo.value = {}
+  scrumSprints.value = [{ id: 1, name: 'Sprint 1', startDate: '', endDate: '' }, { id: 2, name: 'Sprint 2', startDate: '', endDate: '' }]
+  scrumReviewTab.value = 'stories'
+  scrumExpandedModules.value = {}
+  scrumHiddenCriterionTasks.value = []
+  scrumReviewSearch.value = ''
+  scrumReviewCategoryFilter.value = 'All Categories'
+  scrumReviewStatusFilter.value = 'All Statuses'
+  scrumTaskReviewOpen.value = true
+}
+function setScrumReview(task: ScrumDemoTask, status: ScrumReview): void {
+  task.review = status
+  if (status !== 'approved') {
+    task.sprintId = null
+    // Any dependent task must be reviewed again after a prerequisite changes.
+    invalidateScrumDependents(task.id)
+  }
+}
+function invalidateScrumDependents(taskId: string, visited = new Set<string>()): void {
+  if (visited.has(taskId)) return
+  visited.add(taskId)
+  for (const dependent of scrumTasks.value.filter(task => task.dependencies.includes(taskId))) {
+    dependent.review = 'pending'
+    dependent.sprintId = null
+    invalidateScrumDependents(dependent.id, visited)
+  }
+}
+function editScrumGeneratedTask(task: ScrumDemoTask): void {
+  scrumCreatingTask.value = false
+  scrumTaskDraft.value = { ...task, dependencies: [...task.dependencies] }
+  scrumEditTaskError.value = ''
+  scrumEditTaskOpen.value = true
+}
+const scrumDraftCriteriaOptions = computed(() => scrumCriteriaCatalog.value[scrumTaskDraft.value?.userStory ?? ''] ?? [])
+const scrumDependencyOptions = computed(() => scrumTasks.value
+  .filter(task => task.id !== scrumTaskDraft.value?.id)
+  .map(task => ({ label: `${task.id} · ${task.title}`, value: task.id })))
+function onScrumDraftStoryChanged(): void {
+  if (scrumTaskDraft.value && !scrumDraftCriteriaOptions.value.includes(scrumTaskDraft.value.acceptanceCriteria)) {
+    scrumTaskDraft.value.acceptanceCriteria = scrumDraftCriteriaOptions.value[0] ?? ''
+  }
+}
+function scrumHasDependencyCycle(taskId: string, newDeps: string[]): boolean {
+  const visited = new Set<string>()
+  const walk = (id: string): boolean => {
+    if (id === taskId) return true
+    if (visited.has(id)) return false
+    visited.add(id)
+    const deps = scrumTasks.value.find(task => task.id === id)?.dependencies ?? []
+    return deps.some(walk)
+  }
+  return newDeps.some(walk)
+}
+function saveScrumGeneratedTask(): void {
+  const draft = scrumTaskDraft.value
+  if (!draft) return
+  const original = scrumTasks.value.find(task => task.id === draft.id)
+  if (!scrumCreatingTask.value && !original) return
+  if (!draft.title.trim() || !draft.description.trim() || !draft.module.trim() || !draft.userStory || !draft.acceptanceCriteria || !Number.isFinite(Number(draft.points)) || Number(draft.points) < 1 || Number(draft.points) > 100 || !Number.isFinite(Number(draft.estimatedHours)) || Number(draft.estimatedHours) < 0) {
+    scrumEditTaskError.value = 'Complete required fields, enter 1–100 story points and valid estimated hours (0 or more).'
+    return
+  }
+  if (draft.dependencies.some(id => !scrumTasks.value.some(task => task.id === id)) || scrumHasDependencyCycle(draft.id, draft.dependencies)) {
+    scrumEditTaskError.value = 'Dependencies must exist and cannot create a circular chain.'
+    return
+  }
+  if (!scrumModuleCatalog.value.includes(draft.module.trim())) scrumModuleCatalog.value.push(draft.module.trim())
+  if (scrumCreatingTask.value) {
+    if (original) {
+      scrumEditTaskError.value = 'This task code already exists. Close and try adding the task again.'
+      return
+    }
+    scrumTasks.value.push({ ...draft, points: Number(draft.points), estimatedHours: Number(draft.estimatedHours), dependencies: [...draft.dependencies], review: 'pending', sprintId: null })
+  } else if (original) {
+    Object.assign(original, { ...draft, points: Number(draft.points), estimatedHours: Number(draft.estimatedHours), dependencies: [...draft.dependencies], review: 'pending', sprintId: null })
+    invalidateScrumDependents(draft.id)
+  }
+  scrumEditTaskOpen.value = false
+  scrumTaskDraft.value = null
+  scrumCreatingTask.value = false
+}
+function proceedToScrumPlanning(): void {
+  if (!scrumReviewComplete.value) return
+  void openScrumTeamAssignment()
+}
+function returnToReviewFromInvitation(): void {
+  scrumTeamAssignmentOpen.value = false
+  scrumTaskReviewOpen.value = true
+}
+function continueToScrumPlanning(): void {
+  scrumTeamAssignmentOpen.value = false
+  openScrumPlanning()
+}
+function returnToScrumTaskReview(): void {
+  scrumPlanningOpen.value = false
+  scrumTaskReviewOpen.value = true
+}
+// Step 2 is a local invitation preview: external pages must be confirmed manually.
+const scrumTeamAssignmentOpen = ref(false)
+const scrumMeetingSprintId = ref(1)
+const scrumMeetingTitle = ref('Sprint Task Assignment Meeting')
+const scrumMeetingDate = ref('')
+const scrumMeetingTime = ref('10:00')
+const scrumMeetingDuration = ref(60)
+const scrumMeetingLink = ref('')
+const scrumAttendees = ref<string[]>([])
+const scrumMeetingSprintOptions = computed(() => scrumSprints.value.map(sprint => ({ label: sprint.name, value: sprint.id })))
+const scrumRegistryStakeholders = computed(() => {
+  const seen = new Set<string>()
+  return form.value.stakeholders.flatMap(person => {
+    const id = Number(person.user_id)
+    const role = library.labelFor('stakeholderTypes', person.stakeholder_type) || 'Stakeholder'
+    const key = `${id}:${role}`
+    if (seen.has(key)) return []
+    seen.add(key)
+    const directoryUser = departmentUsers.value.find(user => Number(user.id) === id)
+    const email = (directoryUser?.email || (Number(auth.user?.id) === id ? auth.user?.email : '') || '').trim().toLowerCase()
+    const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null
+    return [{ id, name: directoryUser?.name || (Number(auth.user?.id) === id ? loggedInUserName.value : `User #${id}`),
+      email: validEmail, role }]
+  })
+})
+// Group meeting participants under their assigned stakeholder roles.
+// A user may appear in multiple roles, but invitation emails remain unique.
+const scrumStakeholdersByRole = computed(() => {
+  const roles = new Map<string, typeof scrumRegistryStakeholders.value>()
+  for (const person of scrumRegistryStakeholders.value) {
+    const members = roles.get(person.role) ?? []
+    members.push(person)
+    roles.set(person.role, members)
+  }
+  return Array.from(roles, ([role, people]) => ({
+    role,
+    people: [...people].sort((a, b) => a.name.localeCompare(b.name)),
+  })).sort((a, b) => a.role.localeCompare(b.role))
+})
+const scrumMeetingReady = computed(() => !!scrumMeetingTitle.value.trim() && !!scrumMeetingDate.value && !!scrumMeetingTime.value && Number(scrumMeetingDuration.value) >= 15 && scrumAttendees.value.length > 0 && /^https:\/\/meet\.google\.com\/[a-z0-9-]+(?:[/?#].*)?$/i.test(scrumMeetingLink.value))
+async function openScrumTeamAssignment(): Promise<void> {
+  if (!scrumReviewComplete.value) return
+  scrumMeetingSprintId.value = activeSprintId.value
+  if (!scrumMeetingDate.value) {
+    const now = new Date()
+    scrumMeetingDate.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  }
+  scrumMeetingTitle.value = `${form.value.system_name || 'ONE ICTMS'} - Sprint Planning & Task Assignment`
+  // Load the stakeholder directories even if the registry editor has already closed.
+  const departments = [...stakeholderSourceDepartments.value]
+  await Promise.all(departments.map(async departmentId => {
+    try {
+      const users = await libraryApi.departmentUsers(departmentId)
+      departmentDirectory.value = { ...departmentDirectory.value, [departmentId]: users }
+    } catch {
+      // Missing emails are shown in the stakeholder list rather than guessed.
+    }
+  }))
+  scrumAttendees.value = scrumRegistryStakeholders.value.flatMap(person => person.email ? [person.email] : []).filter((email, index, all) => all.indexOf(email) === index)
+  scrumTaskReviewOpen.value = false
+  scrumPlanningOpen.value = false
+  scrumTeamAssignmentOpen.value = true
+}
+function removeScrumAttendee(email: string): void {
+  scrumAttendees.value = scrumAttendees.value.filter(item => item !== email)
+}
+function restoreScrumAttendee(email: string): void {
+  if (scrumRegistryStakeholders.value.some(person => person.email === email) && !scrumAttendees.value.includes(email)) {
+    scrumAttendees.value.push(email)
+  }
+}
+function launchScrumGoogleMeet(): void {
+  window.open('https://meet.google.com/new', '_blank', 'noopener,noreferrer')
+}
+function launchScrumCalendarInvite(): void {
+  if (!scrumMeetingReady.value) return
+  const start = new Date(`${scrumMeetingDate.value}T${scrumMeetingTime.value}:00`)
+  if (Number.isNaN(start.getTime())) return
+  const end = new Date(start.getTime() + Number(scrumMeetingDuration.value) * 60_000)
+  const stamp = (date: Date): string => `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}T${String(date.getHours()).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}00`
+  const params = new URLSearchParams({
+    action: 'TEMPLATE', text: scrumMeetingTitle.value, dates: `${stamp(start)}/${stamp(end)}`,
+    details: `Google Meet: ${scrumMeetingLink.value}\n\nAgenda: Review approved tasks; discuss sprint scope and estimates; agree on task ownership and dependencies; confirm next steps for ${scrumMeetingSprintOptions.value.find(sprint => sprint.value === scrumMeetingSprintId.value)?.label || 'the upcoming sprint'}.`,
+    location: scrumMeetingLink.value, add: scrumAttendees.value.join(','),
+  })
+  window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, '_blank', 'noopener,noreferrer')
+}
+type ScrumKanbanStatus = 'todo' | 'in-progress' | 'in-review' | 'done'
+const scrumKanbanColumns: { id: ScrumKanbanStatus; label: string }[] = [
+  { id: 'todo', label: 'To Do' }, { id: 'in-progress', label: 'In Progress' },
+  { id: 'in-review', label: 'In Review' }, { id: 'done', label: 'Done' },
+]
+const scrumKanbanOpen = ref(false)
+const scrumKanbanSprintId = ref(1)
+const scrumKanbanCategory = ref<string>('All Categories')
+const scrumKanbanSearch = ref('')
+const scrumKanbanHover = ref<ScrumKanbanStatus | null>(null)
+const scrumKanbanDraggingId = ref<string | null>(null)
+const scrumKanbanStatuses = ref<Record<string, ScrumKanbanStatus>>({})
+const scrumKanbanSprintOptions = computed(() => scrumSprints.value.map(sprint => ({ label: sprint.name, value: sprint.id })))
+const scrumKanbanSelectedSprint = computed(() => scrumSprints.value.find(sprint => sprint.id === scrumKanbanSprintId.value))
+function formatScrumKanbanDate(value?: string): string {
+  if (!value) return 'Not set'
+  const parts = value.split('-').map(Number)
+  if (parts.length !== 3 || parts.some(part => !Number.isFinite(part))) return value
+  const [year, month, day] = parts
+  if (year === undefined || month === undefined || day === undefined) return value
+  const date = new Date(year, month - 1, day)
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return value
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+const scrumKanbanSprintTasks = computed(() => scrumTasks.value.filter(task => task.sprintId === scrumKanbanSprintId.value))
+const scrumKanbanSprintPoints = computed(() => scrumKanbanSprintTasks.value.reduce((total, task) => total + task.points, 0))
+const scrumKanbanCompletedCount = computed(() => scrumKanbanSprintTasks.value.filter(task => scrumKanbanStatusFor(task.id) === 'done').length)
+const scrumKanbanFilteredTasks = computed(() => {
+  const query = scrumKanbanSearch.value.trim().toLowerCase()
+  return scrumKanbanSprintTasks.value.filter(task =>
+    (scrumKanbanCategory.value === 'All Categories' || task.category === scrumKanbanCategory.value) &&
+    (!query || [task.id, task.title, task.module, scrumAssigneeFor(task.id)?.name ?? ''].some(value => value.toLowerCase().includes(query)))
+  )
+})
+function scrumKanbanStatusFor(taskId: string): ScrumKanbanStatus {
+  return scrumKanbanStatuses.value[taskId] ?? 'todo'
+}
+// Dependency badges reflect execution status, not the earlier task-review approval.
+function scrumDependencyKanbanState(taskId: string): { label: string; color: string; textColor: string } {
+  const dependency = scrumTasks.value.find(task => task.id === taskId)
+  if (!dependency) return { label: 'Missing', color: 'red-1', textColor: 'red-9' }
+  if (dependency.sprintId === null) return { label: 'Not planned', color: 'grey-2', textColor: 'grey-8' }
+  switch (scrumKanbanStatusFor(taskId)) {
+    case 'in-progress': return { label: 'In Progress', color: 'blue-1', textColor: 'blue-9' }
+    case 'in-review': return { label: 'In Review', color: 'orange-1', textColor: 'orange-9' }
+    case 'done': return { label: 'Done', color: 'green-1', textColor: 'green-9' }
+    default: return { label: 'To Do', color: 'grey-2', textColor: 'grey-9' }
+  }
+}
+function scrumKanbanTasksInColumn(status: ScrumKanbanStatus): ScrumDemoTask[] {
+  return scrumKanbanFilteredTasks.value.filter(task => scrumKanbanStatusFor(task.id) === status)
+}
+function setScrumKanbanStatus(taskId: string, status: ScrumKanbanStatus): void {
+  if (!scrumKanbanColumns.some(column => column.id === status)) return
+  if (!scrumKanbanSprintTasks.value.some(task => task.id === taskId)) return
+  scrumKanbanStatuses.value = { ...scrumKanbanStatuses.value, [taskId]: status }
+}
+function onScrumKanbanDragStart(event: DragEvent, taskId: string): void {
+  scrumKanbanDraggingId.value = taskId
+  event.dataTransfer?.setData('text/plain', `kanban-task:${taskId}`)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+function onScrumKanbanDrop(event: DragEvent, status: ScrumKanbanStatus): void {
+  const payload = event.dataTransfer?.getData('text/plain') ?? ''
+  const id = payload.startsWith('kanban-task:') ? payload.slice('kanban-task:'.length) : scrumKanbanDraggingId.value
+  if (id) setScrumKanbanStatus(id, status)
+  scrumKanbanHover.value = null
+  scrumKanbanDraggingId.value = null
+}
+function openScrumKanban(): void {
+  if (!scrumTasks.value.some(task => task.sprintId !== null)) return
+  scrumKanbanSprintId.value = scrumTasks.value.some(task => task.sprintId === activeSprintId.value)
+    ? activeSprintId.value : scrumTasks.value.find(task => task.sprintId !== null)?.sprintId ?? activeSprintId.value
+  scrumKanbanCategory.value = 'All Categories'
+  scrumKanbanSearch.value = ''
+  scrumPlanningOpen.value = false
+  scrumKanbanOpen.value = true
+}
+function returnToScrumPlanningFromKanban(): void {
+  scrumKanbanOpen.value = false
+  activeSprintId.value = scrumKanbanSprintId.value
+  scrumPlanningOpen.value = true
+}
+
+const scrumSprints = ref<ScrumDemoSprint[]>([{ id: 1, name: 'Sprint 1', startDate: '', endDate: '' }, { id: 2, name: 'Sprint 2', startDate: '', endDate: '' }])
 const activeSprintId = ref(1)
 const scrumCategoryFilter = ref('All Categories')
 const scrumCategoryFilters = ['All Categories', 'Frontend', 'Backend', 'DB', 'UI/UX'] as const
-const scrumTaskView = ref<'categories' | 'traceability'>('categories')
+const scrumPlanningExpandedModules = ref<string[]>([])
 const expandedScrumTaskId = ref<string | null>(null)
-const selectedScrumStory = ref<string | null>(null)
-const selectedScrumCriterion = ref<string | null>(null)
-const scrumUserStories = computed(() => [...new Set(scrumTasks.value.map(task => task.userStory))])
-const scrumStoryCriteria = computed(() => [...new Set(scrumTasks.value.filter(task => task.userStory === selectedScrumStory.value).map(task => task.acceptanceCriteria))])
-function selectScrumStory(story: string): void {
-  selectedScrumStory.value = story
-  selectedScrumCriterion.value = null
-}
+const scrumUserStories = computed(() => scrumStoryCatalog.value)
 const scrumDraggingId = ref<string | null>(null)
+const scrumDraggingModule = ref<string | null>(null)
 const scrumDropOver = ref(false)
 const reviewedScrumTasks = computed(() => scrumTasks.value.filter(task => task.review !== 'pending').length)
 const scheduledScrumTasks = computed(() => scrumTasks.value.filter(task => task.sprintId !== null).length)
 const unscheduledScrumTasks = computed(() => scrumTasks.value.filter(task => task.sprintId === null).length)
-const visibleScrumSuggestions = computed(() => scrumTasks.value.filter(task => {
-  if (scrumTaskView.value === 'categories') return task.sprintId === null && (scrumCategoryFilter.value === 'All Categories' || task.category === scrumCategoryFilter.value)
-  return task.userStory === selectedScrumStory.value && (selectedScrumCriterion.value === null || task.acceptanceCriteria === selectedScrumCriterion.value)
-}))
-// Connect each acceptance criterion to its module and the actual tasks created for it.
-const visibleScrumTaskGroups = computed(() => {
-  if (scrumTaskView.value === 'categories') {
-    return [{ key: 'category-list', criterion: '', module: '', tasks: visibleScrumSuggestions.value }]
-  }
-  const groups = new Map<string, { key: string; criterion: string; module: string; tasks: ScrumDemoTask[] }>()
+const visibleScrumSuggestions = computed(() => scrumTasks.value.filter(task =>
+  task.sprintId === null && (scrumCategoryFilter.value === 'All Categories' || task.category === scrumCategoryFilter.value)
+))
+const scrumBacklogModuleGroups = computed(() => {
+  const grouped = new Map<string, ScrumDemoTask[]>()
   for (const task of visibleScrumSuggestions.value) {
-    const key = JSON.stringify([task.acceptanceCriteria, task.module])
-    let group = groups.get(key)
-    if (!group) {
-      group = { key, criterion: task.acceptanceCriteria, module: task.module, tasks: [] }
-      groups.set(key, group)
-    }
-    group.tasks.push(task)
-  }
-  return [...groups.values()]
-})
-function scrumGroupsForCriterion(criterion: string): { module: string; tasks: ScrumDemoTask[] }[] {
-  const groups = new Map<string, ScrumDemoTask[]>()
-  for (const task of scrumTasks.value) {
-    if (task.userStory !== selectedScrumStory.value || task.acceptanceCriteria !== criterion) continue
-    const tasks = groups.get(task.module) ?? []
+    const tasks = grouped.get(task.module) ?? []
     tasks.push(task)
-    groups.set(task.module, tasks)
+    grouped.set(task.module, tasks)
   }
-  return [...groups].map(([module, tasks]) => ({ module, tasks }))
+  return [...grouped].map(([module, tasks]) => ({ module, tasks }))
+})
+const activeScrumSprintModules = computed(() => {
+  const grouped = new Map<string, ScrumDemoTask[]>()
+  for (const task of scrumTasks.value.filter(task => task.sprintId === activeSprintId.value)) {
+    const tasks = grouped.get(task.module) ?? []
+    tasks.push(task)
+    grouped.set(task.module, tasks)
+  }
+  return [...grouped].map(([module, tasks]) => ({ module, tasks }))
+})
+function toggleScrumModule(module: string): void {
+  scrumPlanningExpandedModules.value = scrumPlanningExpandedModules.value.includes(module)
+    ? scrumPlanningExpandedModules.value.filter(name => name !== module)
+    : [...scrumPlanningExpandedModules.value, module]
+}
+// Sprint assignees come exclusively from the selected Managing Office directory.
+// These assignments are local preview state until a sprint-assignment API is connected.
+const scrumTaskAssignees = ref<Record<string, number>>({})
+const scrumManagingOfficeUsers = ref<StakeholderUser[]>([])
+const scrumManagingOfficeLoading = ref(false)
+const scrumManagingOfficeError = ref('')
+let scrumManagingOfficeRequestVersion = 0
+const scrumManagingOfficeId = computed(() => {
+  const id = Number(form.value.desc.managing_office)
+  return Number.isInteger(id) && id > 0 ? id : null
+})
+const scrumAssigneeSearch = ref('')
+const filteredScrumAssignees = computed(() => {
+  const query = scrumAssigneeSearch.value.trim().toLowerCase()
+  return scrumManagingOfficeUsers.value.filter(person =>
+    !query || person.name.toLowerCase().includes(query) || (person.email || '').toLowerCase().includes(query))
+})
+function scrumAssigneeFor(taskId: string): StakeholderUser | undefined {
+  return scrumManagingOfficeUsers.value.find(person => person.id === scrumTaskAssignees.value[taskId])
 }
 const activeScrumSprintTasks = computed(() => scrumTasks.value.filter(task => task.sprintId === activeSprintId.value))
+async function loadScrumManagingOfficeUsers(): Promise<void> {
+  const version = ++scrumManagingOfficeRequestVersion
+  const officeId = scrumManagingOfficeId.value
+  scrumManagingOfficeUsers.value = []
+  scrumManagingOfficeError.value = ''
+  if (officeId === null) {
+    scrumManagingOfficeError.value = 'Select a Managing Office in the System Registry to assign sprint tasks.'
+    return
+  }
+  scrumManagingOfficeLoading.value = true
+  try {
+    const users = await libraryApi.departmentUsers(officeId)
+    if (version !== scrumManagingOfficeRequestVersion) return
+    scrumManagingOfficeUsers.value = users
+      .filter(user => Number.isInteger(Number(user.id)) && Number(user.id) > 0)
+      .map(user => ({ id: Number(user.id), name: user.name?.trim() || `User #${user.id}`,
+        email: user.email ?? null, departmentIds: [officeId] }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    const allowed = new Set(scrumManagingOfficeUsers.value.map(user => user.id))
+    scrumTaskAssignees.value = Object.fromEntries(Object.entries(scrumTaskAssignees.value)
+      .filter(([, id]) => allowed.has(id)))
+    if (users.length === 0) scrumManagingOfficeError.value = 'No users found in the Managing Office.'
+  } catch (error) {
+    if (version !== scrumManagingOfficeRequestVersion) return
+    scrumManagingOfficeError.value = `Unable to load Managing Office members: ${errorMessage(error)}`
+  } finally {
+    if (version === scrumManagingOfficeRequestVersion) scrumManagingOfficeLoading.value = false
+  }
+}
+function setScrumTaskAssignee(taskId: string, userId: number | null): void {
+  const task = scrumTasks.value.find(item => item.id === taskId)
+  if (!task) return
+  if (userId === null) {
+    const remaining = { ...scrumTaskAssignees.value }
+    delete remaining[taskId]
+    scrumTaskAssignees.value = remaining
+    return
+  }
+  if (task.sprintId === null || !scrumManagingOfficeUsers.value.some(user => user.id === userId)) return
+  scrumTaskAssignees.value = { ...scrumTaskAssignees.value, [taskId]: userId }
+}
+
+const activeScrumSprint = computed(() => scrumSprints.value.find(sprint => sprint.id === activeSprintId.value))
+const activeScrumSprintHours = computed(() => activeScrumSprintTasks.value.reduce((sum, task) => sum + task.estimatedHours, 0))
 const activeScrumSprintName = computed(() => scrumSprints.value.find(sprint => sprint.id === activeSprintId.value)?.name ?? 'Sprint')
 const activeScrumSprintPoints = computed(() => activeScrumSprintTasks.value.reduce((sum, task) => sum + task.points, 0))
 function scrumReviewLabel(review: ScrumReview): string {
@@ -1180,42 +2619,94 @@ function scrumReviewLabel(review: ScrumReview): string {
 function canPlanScrumTask(task: ScrumDemoTask): boolean {
   return task.review === 'approved' && task.dependencies.every(dep => scrumTasks.value.find(candidate => candidate.id === dep)?.review === 'approved')
 }
+function scrumModuleTasks(module: string, sprintId: number | null): ScrumDemoTask[] {
+  return scrumTasks.value.filter(task => task.module === module && task.sprintId === sprintId)
+}
+function canPlanScrumModule(module: string): boolean {
+  const tasks = scrumModuleTasks(module, null)
+  return tasks.length > 0 && tasks.every(canPlanScrumTask)
+}
+function moveScrumModule(module: string, sprintId: number | null): void {
+  const tasks = scrumModuleTasks(module, sprintId === null ? activeSprintId.value : null)
+  // Keep module assignment atomic: a module is never partially planned by a single drop.
+  if (sprintId !== null && (tasks.length === 0 || !tasks.every(canPlanScrumTask))) return
+  for (const task of tasks) {
+    task.sprintId = sprintId
+    if (sprintId === null) setScrumTaskAssignee(task.id, null)
+  }
+}
 function countScrumSprintTasks(id: number): number { return scrumTasks.value.filter(task => task.sprintId === id).length }
 function openScrumPlanning(): void {
-  scrumTasks.value = demoScrumTasks.map(task => ({ ...task }))
-  scrumSprints.value = [{ id: 1, name: 'Sprint 1' }, { id: 2, name: 'Sprint 2' }]
   activeSprintId.value = 1
   scrumCategoryFilter.value = 'All Categories'
-  scrumTaskView.value = 'traceability'
-  selectedScrumStory.value = scrumUserStories.value[0] ?? null
-  selectedScrumCriterion.value = null
-  scrumDraggingId.value = null
+  scrumPlanningExpandedModules.value = [...new Set(scrumTasks.value.filter(task => task.sprintId === null).map(task => task.module))]
+  clearScrumDrag()
   scrumPlanningOpen.value = true
+  void loadScrumManagingOfficeUsers()
 }
 function addScrumSprint(): void {
   const nextId = Math.max(0, ...scrumSprints.value.map(sprint => sprint.id)) + 1
-  scrumSprints.value.push({ id: nextId, name: `Sprint ${nextId}` })
+  scrumSprints.value.push({ id: nextId, name: `Sprint ${nextId}`, startDate: '', endDate: '' })
   activeSprintId.value = nextId
 }
 function moveScrumTask(id: string, sprintId: number | null): void {
   const task = scrumTasks.value.find(item => item.id === id)
-  if (task && (sprintId === null || (task.review === 'approved' && task.dependencies.every(dep => scrumTasks.value.find(candidate => candidate.id === dep)?.review === 'approved')))) task.sprintId = sprintId
+  if (task && (sprintId === null || (task.review === 'approved' && task.dependencies.every(dep => scrumTasks.value.find(candidate => candidate.id === dep)?.review === 'approved')))) {
+    task.sprintId = sprintId
+    if (sprintId === null) setScrumTaskAssignee(task.id, null)
+  }
+}
+function clearScrumDrag(): void {
+  scrumDraggingId.value = null
+  scrumDraggingModule.value = null
+}
+function onScrumModuleDragStart(event: DragEvent, module: string, source: 'backlog' | 'sprint'): void {
+  if (source === 'backlog' && !canPlanScrumModule(module)) {
+    event.preventDefault()
+    return
+  }
+  scrumDraggingModule.value = module
+  scrumDraggingId.value = null
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', `module:${encodeURIComponent(module)}`)
+  }
 }
 function onScrumDragStart(event: DragEvent, id: string): void {
   scrumDraggingId.value = id
-  if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', id) }
+  scrumDraggingModule.value = null
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', `task:${id}`)
+  }
 }
 function onScrumDropToSprint(event: DragEvent): void {
   scrumDropOver.value = false
-  const id = event.dataTransfer?.getData('text/plain') || scrumDraggingId.value
-  if (id) moveScrumTask(id, activeSprintId.value)
-  scrumDraggingId.value = null
+  const payload = event.dataTransfer?.getData('text/plain') ?? ''
+  if (payload.startsWith('module:')) {
+    moveScrumModule(decodeURIComponent(payload.slice('module:'.length)), activeSprintId.value)
+  } else if (payload.startsWith('task:')) {
+    moveScrumTask(payload.slice('task:'.length), activeSprintId.value)
+  } else if (scrumDraggingModule.value) {
+    moveScrumModule(scrumDraggingModule.value, activeSprintId.value)
+  } else if (scrumDraggingId.value) {
+    moveScrumTask(scrumDraggingId.value, activeSprintId.value)
+  }
+  clearScrumDrag()
 }
 function onScrumDropToBacklog(event: DragEvent): void {
   event.preventDefault()
-  const id = event.dataTransfer?.getData('text/plain') || scrumDraggingId.value
-  if (id) moveScrumTask(id, null)
-  scrumDraggingId.value = null
+  const payload = event.dataTransfer?.getData('text/plain') ?? ''
+  if (payload.startsWith('module:')) {
+    moveScrumModule(decodeURIComponent(payload.slice('module:'.length)), null)
+  } else if (payload.startsWith('task:')) {
+    moveScrumTask(payload.slice('task:'.length), null)
+  } else if (scrumDraggingModule.value) {
+    moveScrumModule(scrumDraggingModule.value, null)
+  } else if (scrumDraggingId.value) {
+    moveScrumTask(scrumDraggingId.value, null)
+  }
+  clearScrumDrag()
 }
 
 const formStep = ref(1)
@@ -2953,6 +4444,12 @@ onMounted(() => {
 .scrum-planner__sprint-summary { display:flex; align-items:center; justify-content:space-between; gap:10px; background:#f8faff; padding:12px 20px; flex-shrink:0; }
 .scrum-planner__sprint-summary div { display:flex; flex-direction:column; gap:3px; }
 .scrum-planner__sprint-summary strong { font-size:13px; color:#28426e; }
+.scrum-planner__sprint-summary { gap:16px; flex-wrap:wrap; }
+.scrum-planner__sprint-dates { display:flex !important; flex-direction:row !important; align-items:center; flex:1 1 260px; gap:10px !important; min-width:0; }
+.scrum-planner__sprint-dates .q-field { flex:1 1 0; min-width:110px; max-width:190px; }
+.scrum-planner__sprint-effort { margin-left:auto; text-align:right; white-space:nowrap; }
+.scrum-planner__sprint-effort small { font-size:11px; color:#63789b; }
+@media(max-width:650px) { .scrum-planner__sprint-dates { order:3; flex-basis:100%; } .scrum-planner__sprint-effort { margin-left:auto; } }
 .scrum-planner__dropzone { margin:14px; border:2px dashed #ccdaee; border-radius:13px; padding:12px; flex:1; min-height:190px; background:#fafdff; overflow:auto; display:flex; flex-direction:column; gap:11px; }
 .scrum-planner__dropzone.is-over { border-color:#3975cd; background:#f0f5ff; }
 .scrum-planner__drop-hint { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; text-align:center; margin:auto; padding:28px 15px; }
@@ -3062,4 +4559,346 @@ onMounted(() => {
 .scrum-planner__trace-task-chevron { color: #73829a; margin-left: auto; flex-shrink: 0; }
 .scrum-planner__trace-task-subtitle { margin: 4px 0 0; }
 .scrum-planner__trace-task-details { margin-top: 9px; padding: 9px 2px 2px; }
+
+.scrum-review-page { display:flex; flex-direction:column; height:100vh; background:#f5f7fc; }
+.scrum-review-page__header { background:linear-gradient(110deg,#142c69,#2554aa); color:#fff; padding:24px 30px; display:flex; justify-content:space-between; align-items:center; gap:20px; }
+.scrum-review-page__header h2 { font-size:23px; font-weight:750; margin:3px 0; }
+.scrum-review-page__header p { margin:0; opacity:.85; font-size:12px; }
+.scrum-review-page__summary { display:flex; flex-wrap:wrap; gap:14px; padding:17px 28px 0; }
+.scrum-review-page__summary span { padding:11px 16px; border:1px solid #dce4f2; border-radius:10px; background:#fff; font-size:12px; color:#4e607e; }
+.scrum-review-page__summary b { font-size:17px; color:#1b407e; margin-right:4px; }
+.scrum-review-page__toolbar { display:flex; flex-wrap:wrap; gap:12px; padding:18px 28px 12px; }
+.scrum-review-page__search { flex:1; min-width:230px; }
+.scrum-review-page__body { overflow:auto; flex:1; padding:0 28px 24px; }
+.scrum-review-page__story { padding:17px; background:#fff; border:1px solid #dce4f2; border-radius:13px; margin-bottom:15px; }
+.scrum-review-page__story-title { display:flex; align-items:flex-start; gap:10px; color:#243e6d; font-size:13px; margin-bottom:13px; }
+.scrum-review-page__criterion { padding:12px; border:1px solid #e0e7f2; border-radius:9px; margin-top:12px; }
+.scrum-review-page__criterion-title { display:flex; align-items:flex-start; gap:9px; color:#4b6181; font-size:12px; margin-bottom:12px; }
+.scrum-review-page__task { border:1px solid #e3e9f4; border-radius:9px; padding:14px; margin-top:9px; }
+.scrum-review-page__task-top { display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+.scrum-review-page__task-name { flex:1; min-width:200px; display:flex; flex-direction:column; gap:4px; color:#21395f; font-size:13px; }
+.scrum-review-page__task-name small { color:#71809b; font-size:11px; }
+.scrum-review-page__task p { color:#53667f; font-size:12px; margin:9px 0; }
+.scrum-review-page__dependencies { color:#6b7b92; font-size:11px; }
+.scrum-review-page__actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:12px; }
+.scrum-review-page__footer { flex-shrink:0; padding:14px 28px; background:#fff; border-top:1px solid #dee5f0; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; color:#687b96; font-size:12px; }
+.scrum-task-editor { width:min(760px, calc(100vw - 24px)); max-width:760px; }
+.scrum-task-editor__fields { display:flex; flex-direction:column; gap:13px; max-height:65vh; overflow:auto; }
+.scrum-task-editor__grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+@media(max-width:650px) { .scrum-review-page__header { padding:18px; } .scrum-review-page__toolbar,.scrum-review-page__body { padding-left:15px; padding-right:15px; } .scrum-task-editor__grid { grid-template-columns:1fr; } }
+/* Criterion-level task creation and linked task overview. */
+.scrum-review-page__linked-tasks { margin-top: 12px; display: grid; gap: 7px; }
+.scrum-review-page__linked-task { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border: 1px solid #e3e9f3; border-radius: 8px; background: #f9fbff; min-width: 0; }
+.scrum-review-page__linked-task .col { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.scrum-review-page__linked-task .col strong { font-size: 12px; overflow-wrap: anywhere; }
+.scrum-review-page__linked-task .col small { font-size: 11px; color: #667792; }
+@media(max-width: 650px) { .scrum-review-page__linked-task { flex-wrap: wrap; } }
+
+
+/* Task Review visual refresh: consistent spacing, compact filters and accessible controls */
+.scrum-review-page { background:#f4f6fb; }
+.scrum-review-page__header { padding:20px 28px; min-height:98px; }
+.scrum-review-page__summary { display:flex; align-items:stretch; gap:10px; padding:16px 26px 10px; }
+.scrum-review-page__summary > span { display:flex; align-items:center; gap:7px; padding:10px 13px; min-height:48px; }
+.scrum-review-page__summary > span b { margin:0; }
+.scrum-review-page__progress { flex:1 1 220px; min-width:180px; display:flex; flex-direction:column; justify-content:center; gap:7px; padding:7px 5px 7px 14px; }
+.scrum-review-page__progress-caption { display:flex; justify-content:space-between; gap:12px; color:#5d6c83; font-size:11px; }
+.scrum-review-page__progress-caption strong { font-weight:650; }
+.scrum-review-page__toolbar { padding:8px 26px 13px; align-items:center; gap:10px; }
+.scrum-review-page__toolbar :deep(.q-field--dense .q-field__control) { min-height:42px; height:42px; }
+.scrum-review-page__status-select { min-width:172px; }
+.scrum-review-page__main-tabs { padding:0 26px; border-bottom:1px solid #dce4f0; gap:10px; }
+.scrum-review-page__main-tabs :deep(.q-tab) { min-height:48px; padding:0 15px; }
+.scrum-review-page__body { padding:18px 26px 24px; }
+.scrum-review-page__module-tools { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; margin-bottom:18px; }
+.scrum-review-page__category-switch { display:flex; flex-wrap:wrap; gap:7px; }
+.scrum-review-page__category-button { border:1px solid #dce3ef; border-radius:9px; background:white; color:#526581; padding:0 14px; min-height:36px; font-size:12px; font-weight:600; }
+.scrum-review-page__category-button.is-active { color:white; background:#244aa3; border-color:#244aa3; }
+.scrum-review-page__category-button:focus-visible, .scrum-review-page__expand-actions :deep(.q-btn):focus-visible { outline:2px solid #244aa3; outline-offset:2px; }
+.scrum-review-page__expand-actions { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+.scrum-review-page__expand-actions > span { font-size:12px; color:#6c7d98; margin-right:7px; white-space:nowrap; }
+.scrum-review-page__module-card { margin-bottom:11px; padding:0; border-color:#dce4f2; overflow:hidden; transition:border-color .15s,box-shadow .15s; }
+.scrum-review-page__module-card:hover { border-color:#afc2e5; box-shadow:0 3px 13px rgba(26,59,117,.05); }
+.scrum-review-page__module-card :deep(.q-item) { min-height:72px; padding:12px 19px; }
+.scrum-review-page__module-card :deep(.q-item__section--avatar) { min-width:40px; }
+.scrum-review-page__module-card :deep(.q-card__section) { padding:0 18px 17px; }
+.scrum-review-page__module-name { font-size:14px; color:#1f3559; font-weight:700; }
+.scrum-review-page__module-count { border-radius:7px; background:#eff3fb; color:#4d6081; font-size:11px; padding:5px 9px; }
+.scrum-review-page__task { background:#fbfcff; padding:14px 15px; margin-top:9px; border-color:#e0e7f3; }
+.scrum-review-page__task-top { align-items:center; }
+.scrum-review-page__task-name { line-height:1.5; }
+.scrum-review-page__task-name small { line-height:1.65; overflow-wrap:anywhere; }
+.scrum-review-page__category-tag { display:inline-block; padding:2px 7px; border-radius:5px; background:#eaf0ff; color:#2d50a0; font-weight:600; margin-right:5px; }
+.scrum-review-page__task p { margin:10px 0 6px; line-height:1.5; }
+.scrum-review-page__actions { margin-top:8px; gap:5px; }
+.scrum-review-page__actions :deep(.q-btn) { width:34px; height:34px; }
+.scrum-review-page__no-results { min-height:230px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; color:#5e718f; text-align:center; }
+.scrum-review-page__no-results strong { font-size:15px; color:#263f69; }
+.scrum-review-page__footer { padding:12px 26px; min-height:62px; }
+@media (max-width: 1050px) { .scrum-review-page__progress { flex-basis:100%; } .scrum-review-page__module-tools { align-items:flex-start; } }
+@media (max-width: 650px) { .scrum-review-page__summary { padding:12px 15px 8px; } .scrum-review-page__summary > span { flex:1 1 140px; } .scrum-review-page__toolbar { padding:8px 15px; } .scrum-review-page__status-select { min-width:140px; flex:1; } .scrum-review-page__main-tabs { padding:0 10px; } .scrum-review-page__main-tabs :deep(.q-tab) { padding:0 7px; } .scrum-review-page__body { padding:12px 14px 20px; } .scrum-review-page__expand-actions { width:100%; } .scrum-review-page__module-card :deep(.q-item) { padding:10px 12px; } .scrum-review-page__module-card :deep(.q-card__section) { padding:0 10px 12px; } .scrum-review-page__footer { padding:10px 14px; } }
+
+
+/* Scrum Planning: Module -> Task only; requirement editing remains in Task Review. */
+.scrum-plan-module-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-top:1px solid #e9edf5; border-bottom:1px solid #e9edf5; flex-wrap:wrap; }
+.scrum-plan-module-filters,.scrum-plan-module-tools { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.scrum-plan-module-tools { color:#75839b; font-size:11px; }
+.scrum-plan-module-tools .q-btn { font-size:11px; }
+.scrum-plan-module-list { padding:14px 16px; gap:10px; }
+.scrum-plan-module-card { background:white; border:1px solid #dfe6f2; border-radius:12px; overflow:hidden; flex-shrink:0; }
+.scrum-plan-module-header { display:flex; align-items:center; gap:10px; width:100%; padding:13px 14px; border:0; background:#fff; color:#24385f; font:inherit; cursor:pointer; text-align:left; }
+.scrum-plan-module-header:hover { background:#f5f8fe; }
+.scrum-plan-module-name { flex:1; font-size:13px; font-weight:800; }
+.scrum-plan-module-count { font-size:10px; background:#f0f3fa; color:#526889; border-radius:7px; padding:4px 8px; }
+.scrum-plan-module-tasks { padding:0 12px 12px; display:flex; flex-direction:column; gap:8px; }
+.scrum-plan-task-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:10px; border-radius:9px; border:1px solid #e2e9f5; background:#fbfcff; }
+.scrum-plan-task-row[draggable="true"] { cursor:grab; }
+.scrum-plan-task-code { border-radius:5px; background:#eaf1ff; color:#2454a3; font-size:10px; font-weight:800; padding:5px 7px; }
+.scrum-plan-task-copy { flex:1; min-width:145px; display:flex; flex-direction:column; gap:3px; }
+.scrum-plan-task-copy strong { font-size:12px; color:#24385c; line-height:1.35; }
+.scrum-plan-task-copy span { font-size:10px; color:#73839b; }
+.scrum-plan-task-details { flex-basis:100%; padding:9px 12px; border-top:1px solid #e3eaf4; color:#62718a; font-size:11px; display:flex; flex-direction:column; gap:5px; }
+.scrum-plan-sprint-module { display:flex; flex-direction:column; gap:9px; }
+.scrum-plan-sprint-module-title { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:800; color:#284d92; padding:5px 2px; }
+.scrum-plan-sprint-module-title span { margin-left:auto; font-size:10px; color:#7d8ea7; }
+@media(max-width:800px) { .scrum-plan-module-toolbar { align-items:flex-start; } .scrum-plan-module-tools { width:100%; } .scrum-plan-task-row { gap:6px; } }
+</style>
+
+
+<style scoped>
+.scrum-plan-module-drag-handle { cursor: grab; opacity: 0.65; flex-shrink: 0; }
+.scrum-plan-module-header[draggable="true"], .scrum-plan-sprint-module-title[draggable="true"] { cursor: grab; }
+.scrum-plan-module-header[draggable="true"]:active, .scrum-plan-sprint-module-title[draggable="true"]:active { cursor: grabbing; }
+</style>
+
+<style scoped>
+/* Shared module / task card appearance across the Sprint Plan and Tasks panes. */
+.scrum-plan-sprint-card { flex-shrink:0; }
+.scrum-plan-sprint-card .scrum-plan-sprint-module-title {
+  margin:0; width:100%; padding:13px 14px; gap:10px;
+  color:#24385f; background:#fff; font-size:inherit;
+  border-bottom:1px solid #edf1f7;
+}
+.scrum-plan-sprint-card .scrum-plan-module-tasks { padding:12px; }
+.scrum-plan-sprint-card .scrum-plan-task-row { min-width:0; }
+.scrum-plan-sprint-card .scrum-plan-module-count { margin-left:0; }
+.scrum-plan-sprint-card .scrum-plan-sprint-module-title:hover { background:#f5f8fe; }
+.scrum-plan-sprint-card .scrum-plan-module-header[draggable="true"] { cursor:grab; }
+</style>
+
+<style scoped>
+.scrum-team-page { display: flex; flex-direction: column; height: 100%; background: #f4f6fc; }
+.scrum-team-content { flex: 1; overflow-y: auto; padding: 24px; }
+.scrum-team-grid { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr); gap: 20px; align-items: start; }
+.scrum-team-panel { background: white; border: 1px solid #dce4f3; border-radius: 14px; padding: 22px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.scrum-team-panel__head { display: flex; align-items: center; gap: 10px; color: #213a76; font-size: 17px; margin-bottom: 4px; }
+.scrum-team-row { display: flex; gap: 12px; }
+.scrum-stakeholder-role-group { border: 1px solid #e0e7f4; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; gap: 0; }
+.scrum-stakeholder-role-header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #f3f6fc; color: #213a76; }
+.scrum-stakeholder-role-group .scrum-stakeholder-row { border: 0; border-top: 1px solid #e8edf7; border-radius: 0; }
+.scrum-stakeholder-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid #e0e7f4; border-radius: 10px; }
+.scrum-stakeholder-details { display:flex; flex:1; flex-direction:column; gap:3px; min-width:0; }
+.scrum-stakeholder-details strong { font-size: 13px; color:#213a76; }
+.scrum-stakeholder-details small { font-size: 12px; color:#63718e; overflow-wrap:anywhere; }
+.scrum-team-module { border: 1px solid #e0e7f4; border-radius: 10px; overflow: hidden; }
+.scrum-team-module__title { display: flex; align-items: center; gap: 8px; background: #f3f6fc; padding: 12px 14px; font-weight: 700; color: #203766; }
+.scrum-team-task { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; gap: 14px; border-top: 1px solid #e8edf7; }
+.scrum-team-task__copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.scrum-team-task__copy strong { font-size: 13px; }
+.scrum-team-task__copy small { color: #63718e; }
+.scrum-team-assignee { width: 220px; flex-shrink: 0; }
+@media (max-width: 850px) { .scrum-team-grid { grid-template-columns: 1fr; } .scrum-team-content { padding: 12px; } .scrum-team-task { flex-wrap: wrap; } .scrum-team-assignee { width: 100%; } }
+
+/* Dedicated requirement-creation forms */
+.scrum-creation-dialog { border-radius: 16px; }
+.scrum-creation-dialog__preview { padding: 15px 18px; border-radius: 10px; background: #f5f7fc; color: #233458; line-height: 1.6; }
+.scrum-creation-dialog__preview p { margin-top: 6px; }
+</style>
+
+<style scoped>
+/* Sprint task ownership: compact popover rather than a dense select field. */
+.scrum-assignee { width: 158px; flex-shrink: 0; }
+.scrum-assignee__trigger {
+  width:100%; min-height:39px; padding:4px 7px; text-align:left;
+  background:#f4f7fd; color:#253b66; border:1px dashed #cbd6eb; border-radius:9px;
+  box-shadow:none;
+}
+.scrum-assignee__trigger--assigned { background:#eef5ff; border:1px solid #cbdcf9; }
+.scrum-assignee__trigger :deep(.q-btn__content) { width:100%; flex-wrap:nowrap; justify-content:flex-start; gap:7px; }
+.scrum-assignee__avatar { background:#e2eaf8; color:#37568f; font-weight:800; font-size:13px; flex-shrink:0; }
+.scrum-assignee__avatar--assigned { background:#d5e4ff; color:#234c96; font-size:11px; }
+.scrum-assignee__copy { display:flex; flex:1; min-width:0; flex-direction:column; gap:1px; text-align:left; line-height:1.15; }
+.scrum-assignee__copy small { font-size:9px; font-weight:500; color:#79879f; }
+.scrum-assignee__copy strong { font-size:11px; font-weight:750; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.scrum-assignee__arrow { color:#617598; flex-shrink:0; }
+.scrum-assignee__menu { min-width:280px; max-width:min(360px, 92vw); border:1px solid #dae4f5; border-radius:12px; box-shadow:0 12px 35px rgba(25,46,92,.16); overflow:hidden; }
+.scrum-assignee__menu-head { display:flex; flex-direction:column; gap:3px; padding:15px 16px 10px; color:#253b66; }
+.scrum-assignee__menu-head strong { font-size:13px; }
+.scrum-assignee__menu-head span { color:#8190a8; font-size:11px; }
+.scrum-assignee__search { margin:0 12px 9px; }
+.scrum-assignee__options { max-height:250px; overflow-y:auto; }
+.scrum-assignee__option--selected { background:#eff5ff; color:#254d96; }
+@media (max-width: 1120px) { .scrum-assignee { width:140px; } }
+@media (max-width: 680px) { .scrum-assignee { width:100%; flex-basis:100%; } }
+</style>
+
+<style scoped>
+.scrum-kanban-page { display:flex; flex-direction:column; height:100vh; background:#f4f7fd; }
+.scrum-kanban-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px 24px; flex-wrap:wrap; }
+.scrum-kanban-toolbar__filters { display:flex; align-items:center; flex-wrap:wrap; gap:12px; flex:1; }
+.scrum-kanban-sprint { min-width:170px; }
+.scrum-kanban-dates { display:flex; align-items:center; gap:11px; min-height:40px; padding:5px 12px; border:1px solid #d9e3f3; border-radius:8px; background:#fff; color:#273e70; }
+.scrum-kanban-date { display:flex; flex-direction:column; gap:2px; white-space:nowrap; }
+.scrum-kanban-date span { color:#7484a0; font-size:9px; font-weight:700; letter-spacing:.55px; }
+.scrum-kanban-date strong { color:#253d72; font-size:12px; font-weight:600; }
+.scrum-kanban-date-arrow { flex-shrink:0; }
+@media (max-width:650px) { .scrum-kanban-dates { flex:1 1 100%; justify-content:center; } }
+.scrum-kanban-category { min-width:160px; }
+.scrum-kanban-search { min-width:220px; max-width:420px; flex:1; }
+.scrum-kanban-toolbar__summary { display:flex; align-items:center; gap:14px; font-size:12px; color:#667792; white-space:nowrap; }
+.scrum-kanban-toolbar__summary strong { color:#233e76; }
+.scrum-kanban-board { display:grid; grid-template-columns:repeat(4,minmax(235px,1fr)); gap:14px; padding:0 24px 22px; flex:1; min-height:0; overflow:auto; }
+.scrum-kanban-column { display:flex; flex-direction:column; min-height:240px; border:1px solid #dce5f4; border-radius:14px; background:#ebf0f9; overflow:hidden; }
+.scrum-kanban-column--over { border-color:#4168bd; background:#e0eafb; }
+.scrum-kanban-column__head { display:flex; align-items:center; justify-content:space-between; padding:15px; color:#253b69; border-bottom:1px solid #dce5f4; }
+.scrum-kanban-column__head>div { display:flex; gap:9px; align-items:center; }
+.scrum-kanban-column__dot { width:9px; height:9px; border-radius:50%; background:#8797b0; }
+.scrum-kanban-column__dot--in-progress { background:#3566c6; }
+.scrum-kanban-column__dot--in-review { background:#dd9c31; }
+.scrum-kanban-column__dot--done { background:#21a56b; }
+.scrum-kanban-column__count { border-radius:12px; background:#fff; padding:3px 9px; font-size:12px; }
+.scrum-kanban-column__cards { padding:12px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; flex:1; }
+.scrum-kanban-task { display:flex; flex-direction:column; gap:10px; border:1px solid #d9e2f1; background:white; border-radius:10px; padding:13px; cursor:grab; box-shadow:0 2px 6px rgba(29,54,99,.04); }
+.scrum-kanban-task:active { cursor:grabbing; }
+.scrum-kanban-task__top,.scrum-kanban-task__meta,.scrum-kanban-task__footer { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.scrum-kanban-task__title { color:#243b69; line-height:1.45; font-size:13px; }
+.scrum-kanban-task__module,.scrum-kanban-task__deps { font-size:11px; color:#657895; }
+.scrum-kanban-task__meta { color:#4a6592; font-size:11px; }
+.scrum-kanban-task__priority { font-size:11px; color:#74829a; }
+.scrum-kanban-task__footer { padding-top:6px; border-top:1px solid #edf1f8; }
+.scrum-kanban-task__owner { display:flex; align-items:center; gap:5px; font-size:11px; color:#4a6085; overflow:hidden; }
+.scrum-kanban-task__status { width:100%; }
+.scrum-kanban-empty { text-align:center; padding:26px 8px; color:#90a0b8; border:1px dashed #cbd7e9; border-radius:9px; font-size:12px; }
+.scrum-kanban-details { width:min(600px,95vw); max-width:95vw; border-radius:14px; }
+@media (max-width:1100px) { .scrum-kanban-board { grid-template-columns:repeat(4,minmax(250px,1fr)); } }
+@media (max-width:650px) { .scrum-kanban-toolbar { padding:12px; } .scrum-kanban-board { padding:0 12px 12px; } .scrum-kanban-toolbar__filters>* { flex:1; } }
+</style>
+
+<style scoped>
+.scrum-task-preview{width:100%;height:100%;display:flex;flex-direction:column;background:#f4f7fc;color:#243457;overflow:hidden}
+.scrum-task-preview__header{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:17px 26px 14px;background:#fff;border-bottom:1px solid #dce5f4}
+.scrum-task-preview__header h2{font-size:24px;line-height:1.3;font-weight:750;margin:6px 0;color:#182a54;display:flex;align-items:center;gap:10px}
+.scrum-task-preview__header h2 .q-icon{color:#5045d5}
+.scrum-task-preview__header p{font-size:12px;color:#66799b;margin:4px 0 0}
+.scrum-task-preview__columns{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;padding:16px;overflow:auto}
+.scrum-task-preview__left,.scrum-task-preview__right{min-width:0;border:1px solid #dce5f5;border-radius:13px;background:#fff;overflow:auto}
+.scrum-task-preview__left{display:flex;flex-direction:column}
+.scrum-task-preview__summary{padding:18px 20px}
+.scrum-task-preview__badges{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.scrum-task-preview__task-id{font-size:14px;font-weight:800;padding:7px 10px;color:#31227f;background:#ece7ff;border-radius:8px}
+.scrum-task-preview__summary h3{font-size:19px;line-height:1.4;color:#18274c;font-weight:750;margin:12px 0 6px}
+.scrum-task-preview__summary p{color:#4b6085;line-height:1.6;font-size:13px;margin:0}
+.scrum-task-preview__tabs{border-bottom:1px solid #d9e3f4;flex-shrink:0}
+.scrum-task-preview__tabs :deep(.q-tab){min-height:46px;font-size:11px;padding:0 8px}
+.scrum-task-preview__panels{padding:16px 20px;flex:1}
+.scrum-task-preview__detail-list{margin:0;border:1px solid #dce5f4;border-radius:9px;padding:5px 13px}
+.scrum-task-preview__detail-list>div{display:grid;grid-template-columns:135px minmax(0,1fr);gap:10px;border-bottom:1px solid #e5ebf5;padding:10px 2px;font-size:12px;line-height:1.5}
+.scrum-task-preview__detail-list>div:last-child{border-bottom:0}
+.scrum-task-preview__detail-list dt{font-weight:700;color:#293b61}
+.scrum-task-preview__detail-list dd{margin:0;overflow-wrap:anywhere;color:#394f74}
+.scrum-task-preview__actions{display:flex;flex-wrap:wrap;gap:10px;padding:14px 20px;border-top:1px solid #e1e8f5}
+.scrum-task-preview__trace-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:17px 18px;border-bottom:1px solid #dce5f4;color:#24385d}
+.scrum-task-preview__trace-head small{font-size:10px;color:#6056a0;background:#f0edff;border-radius:6px;padding:5px 8px;margin-left:auto}
+.scrum-task-preview__timeline{padding:18px 22px 22px 52px}
+.scrum-task-preview__trace-node{position:relative;padding:0 0 22px 24px;border-left:2px solid #bcc9e6}
+.scrum-task-preview__trace-node:last-child{border-left-color:transparent;padding-bottom:0}
+.scrum-task-preview__trace-marker{position:absolute;top:5px;left:-18px;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1462c9;color:#fff;box-shadow:0 2px 5px #284b8833}
+.scrum-task-preview__trace-label{display:inline-flex;font-size:12px;font-weight:800;border-radius:6px;padding:5px 10px;margin-bottom:6px}
+.scrum-task-preview__trace-card{border:1px solid #bdd7fa;background:#f1f7ff;border-radius:9px;padding:12px 13px;font-size:12px;color:#263c63;overflow-wrap:anywhere}
+.scrum-task-preview__trace-card>strong{font-size:14px;display:block;line-height:1.45}
+.scrum-task-preview__trace-card>small{display:block;color:#66789c;margin-top:4px}
+.scrum-task-preview__trace-card>p{margin:6px 0 0;line-height:1.5}
+.scrum-task-preview__trace-node--module .scrum-task-preview__trace-label{background:#d7e9ff;color:#075bb8}
+.scrum-task-preview__trace-node--story .scrum-task-preview__trace-marker{background:#7542db}
+.scrum-task-preview__trace-node--story .scrum-task-preview__trace-label{background:#e9dfff;color:#6033b6}
+.scrum-task-preview__trace-node--story .scrum-task-preview__trace-card{background:#f8f3ff;border-color:#d7c6fd}
+.scrum-task-preview__trace-node--criterion .scrum-task-preview__trace-marker{background:#e49b0e}
+.scrum-task-preview__trace-node--criterion .scrum-task-preview__trace-label{background:#fff0cf;color:#8b5700}
+.scrum-task-preview__trace-node--criterion .scrum-task-preview__trace-card{background:#fff9ec;border-color:#f1d594}
+.scrum-task-preview__criterion{display:flex;align-items:flex-start;gap:8px;background:#fff;border-radius:5px;padding:7px;margin:4px 0;opacity:.68}
+.scrum-task-preview__criterion.is-linked{opacity:1;border:1px solid #d5e6bc}
+.scrum-task-preview__criterion>span{background:#eee7ff;color:#55419f;border-radius:5px;font-size:10px;font-weight:750;padding:4px;white-space:nowrap}
+.scrum-task-preview__criterion p{margin:2px 0 0;line-height:1.45;flex:1}
+.scrum-task-preview__criterion-note{display:flex;align-items:center;gap:5px;color:#687793;margin-top:8px}
+
+/* Dependency visualization: prerequisites → selected task → dependents */
+.scrum-dependency-diagram{border:1px solid #dce5f5;border-radius:12px;overflow:hidden;background:#fff}
+.scrum-dependency-diagram__header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:13px 14px;border-bottom:1px solid #e1e7f6}
+.scrum-dependency-diagram__title,.scrum-dependency-diagram__legend{display:flex;align-items:center;gap:8px}
+.scrum-dependency-diagram__title{font-size:13px;color:#25365a}
+.scrum-dependency-diagram__legend{font-size:10px;gap:14px;color:#596b8b;flex-wrap:wrap}
+.scrum-dependency-diagram__legend>span{display:flex;align-items:center;gap:5px}
+.scrum-dependency-diagram__line{display:inline-block;width:20px;border-top:2px solid #8d35f3;position:relative}
+.scrum-dependency-diagram__line:after{content:'';position:absolute;right:-2px;top:-4px;border-top:3px solid transparent;border-bottom:3px solid transparent;border-left:5px solid #8d35f3}
+.scrum-dependency-diagram__line--post{border-color:#267bef;border-top-style:dashed}
+.scrum-dependency-diagram__line--post:after{border-left-color:#267bef}
+.scrum-dependency-diagram__scroll{overflow-x:auto;padding:16px 12px 20px}
+.scrum-dependency-diagram__graph{display:grid;grid-template-columns:minmax(145px,1fr) 36px minmax(165px,1.1fr) 36px minmax(145px,1fr);align-items:center;min-width:560px}
+.scrum-dependency-diagram__branch,.scrum-dependency-diagram__center{display:flex;flex-direction:column;gap:9px;min-width:0}
+.scrum-dependency-diagram__branch-label{font-size:10px;text-align:center;font-weight:700;color:#7483a5;letter-spacing:.025em}
+.scrum-dependency-diagram__node{display:flex;flex-direction:column;gap:5px;width:100%;min-width:0;border:1px solid #ced6f8;border-radius:9px;text-align:left;padding:10px;background:#f7f5ff;color:#293558;font-family:inherit;box-shadow:0 2px 5px #253d7510}
+button.scrum-dependency-diagram__node{cursor:pointer;transition:border-color .15s,background .15s,transform .15s}
+button.scrum-dependency-diagram__node:hover,button.scrum-dependency-diagram__node:focus-visible{border-color:#7158dc;background:#f0ebff;transform:translateY(-1px);outline:none}
+.scrum-dependency-diagram__node--current{background:#edf4ff;border:2px solid #5895eb}
+.scrum-dependency-diagram__node-head{display:flex;gap:4px;justify-content:space-between;align-items:center;font-size:11px}
+.scrum-dependency-diagram__node-head small{border-radius:4px;padding:2px 4px;background:#e6e2ff;color:#5b47bd;font-size:9px;overflow-wrap:anywhere}
+.scrum-dependency-diagram__node--current .scrum-dependency-diagram__node-head small{background:#dce9ff;color:#2458b3}
+.scrum-dependency-diagram__node-title{font-size:11px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+.scrum-dependency-diagram__node-status{font-size:10px;color:#607393}
+.scrum-dependency-diagram__none{padding:14px 4px;text-align:center;color:#8793ab;font-size:11px;border:1px dashed #d5dded;border-radius:8px}
+.scrum-dependency-diagram__connector{height:2px;position:relative;align-self:center}
+.scrum-dependency-diagram__connector--pre{background:#8d35f3}
+.scrum-dependency-diagram__connector--post{border-top:2px dashed #267bef}
+.scrum-dependency-diagram__connector:after{content:'';position:absolute;right:0;top:-4px;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:7px solid #8d35f3}
+.scrum-dependency-diagram__connector--post:after{top:-6px;border-left-color:#267bef}
+.scrum-dependency-diagram__hint{display:flex;align-items:flex-start;gap:5px;margin:0;padding:10px 13px;border-top:1px solid #e8edf8;font-size:10px;line-height:1.5;color:#6f7e9d}
+.scrum-task-preview__dep-list{display:flex;flex-direction:column;gap:10px}
+.scrum-task-preview__dep-row{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #dce5f4;border-radius:8px}
+.scrum-task-preview__dep-row>div{flex:1;min-width:0}
+.scrum-task-preview__dep-row p{font-size:12px;margin:3px 0 0;color:#607495}
+.scrum-task-preview__empty{text-align:center;color:#7b8ba8;padding:32px 16px}
+.scrum-task-preview__empty p{margin:8px auto;max-width:320px}
+@media(max-width:900px){.scrum-task-preview__columns{grid-template-columns:1fr;overflow:auto}.scrum-task-preview__left,.scrum-task-preview__right{overflow:visible}.scrum-task-preview__detail-list>div{grid-template-columns:110px 1fr}}
+@media(max-width:520px){.scrum-task-preview__columns{padding:9px;gap:9px}.scrum-task-preview__header{padding:12px}.scrum-task-preview__timeline{padding-left:39px}.scrum-task-preview__trace-head small{width:100%;margin-left:0}}
+</style>
+
+<style scoped>
+.scrum-preview-collab { display:flex;flex-direction:column;gap:12px; }
+.scrum-preview-collab__heading { display:flex;justify-content:space-between;align-items:center;color:#223966;gap:8px; }
+.scrum-preview-collab__heading span,.scrum-preview-collab__notice {color:#72829e;font-size:11px;}
+.scrum-preview-collab__empty {border:1px dashed #c9d6eb;border-radius:10px;padding:24px 14px;text-align:center;color:#7789a3;font-size:12px;}
+.scrum-preview-comment,.scrum-preview-file {display:flex;gap:11px;align-items:flex-start;border:1px solid #dfe7f5;border-radius:10px;padding:12px;background:#fbfcff;}
+.scrum-preview-comment__content,.scrum-preview-file__info {min-width:0;flex:1;}
+.scrum-preview-comment__meta {display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:12px;}
+.scrum-preview-comment__meta span,.scrum-preview-file__info small {font-size:11px;color:#7485a0;}
+.scrum-preview-comment__rich { margin-top:7px;font-size:13px;overflow-wrap:anywhere;line-height:1.55; }
+.scrum-preview-comment__rich :deep(p) { margin:0 0 8px; }
+.scrum-preview-comment__rich :deep(ul),.scrum-preview-comment__rich :deep(ol) { padding-left:24px;margin:6px 0; }
+.scrum-preview-comment__rich :deep(img) { display:block;max-width:100%;height:auto;border-radius:8px;margin:8px 0;border:1px solid #dfe7f5; }
+.scrum-preview-comment__rich :deep(blockquote) { border-left:3px solid #b5c4eb;margin:8px 0;padding:4px 12px;background:#f3f6ff; }
+.scrum-preview-comment__reactions {display:flex;flex-wrap:wrap;gap:5px;margin-top:10px;}
+.scrum-preview-comment__reaction {min-width:37px;min-height:28px;border-radius:14px;font-size:13px;padding:0 7px;}
+.scrum-preview-comment__reaction span {font-size:11px;margin-left:4px;}
+.scrum-comment-editor__extras {display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid #e1e9f6;padding:5px 9px;}
+.scrum-comment-emoji-picker {display:grid;grid-template-columns:repeat(6,36px);gap:3px;padding:9px;max-width:260px;}
+.scrum-comment-emoji-picker .q-btn {font-size:19px;}
+.scrum-comment-editor { border:1px solid #cbd7ea;border-radius:10px;overflow:hidden;background:white; }
+.scrum-comment-editor__label { padding:10px 12px 0;font-weight:600;color:#263d6c;font-size:12px; }
+.scrum-comment-editor__input { box-shadow:none!important; }
+.scrum-comment-editor__hint { display:flex;align-items:center;gap:7px;color:#6a7d9d;font-size:11px; }
+.scrum-preview-file {align-items:center;}
+.scrum-preview-file__info {display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere;font-size:12px;}
+.scrum-preview-upload {position:relative;cursor:pointer;display:flex;justify-content:center;align-items:center;gap:10px;border:1px dashed #9bb2df;background:#f5f8ff;color:#274f99;border-radius:10px;padding:18px;font-weight:600;font-size:12px;}
+.scrum-preview-upload input {position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer;}
+.scrum-task-preview__tabs {overflow-x:auto;}
 </style>
