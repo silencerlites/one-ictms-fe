@@ -1600,6 +1600,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import RegistryDocumentRow from '@/components/registry/RegistryDocumentRow.vue'
 import { useQuasar, type QTableColumn } from 'quasar'
 import { registryApi } from '@/services/registry-api'
@@ -1608,6 +1609,8 @@ import { useAuthStore } from '@/stores/auth'
 import { errorMessage } from '@/services/http'
 import { libraryApi, type DepartmentUser, type LibraryOption } from '@/services/library-api'
 import type { RegistryPayload, RegistryRecord } from '@/types/registry'
+const deliveryRoute = useRoute()
+const deliveryRouter = useRouter()
 
 type RegistryRepositoryForm = NonNullable<RegistryPayload['repo']> & {
   frontend_repo_git?: string | null
@@ -2246,6 +2249,7 @@ function openScrumTaskReview(): void {
   scrumReviewCategoryFilter.value = 'All Categories'
   scrumReviewStatusFilter.value = 'All Statuses'
   scrumTaskReviewOpen.value = true
+  recordLocalDeliveryProgress()
 }
 function setScrumReview(task: ScrumDemoTask, status: ScrumReview): void {
   task.review = status
@@ -3550,11 +3554,100 @@ async function deleteSystem(id: number): Promise<void> {
   } catch (error) { $q.notify({ type: 'negative', message: errorMessage(error) }) }
 }
 
+/** Launch the existing project delivery workflow from the Scrum Planning workspace.
+ * Uses the registered system, rather than creating an unrelated set of local drafts.
+ */
+async function openProjectDeliveryFromRoute(): Promise<void> {
+  const raw = deliveryRoute.query.projectDelivery
+  const idText = typeof raw === 'string' ? raw : ''
+  if (!/^[1-9]\d*$/.test(idText)) return
+  const id = Number(idText)
+  if (!Number.isSafeInteger(id)) return
+  await openEdit(id)
+  if (editingId.value !== id || !formOpen.value) return
+  formOpen.value = false
+  const requestedStage = deliveryRoute.query.deliveryStage
+  const stage = typeof requestedStage === 'string' ? requestedStage : 'stories'
+  // Each navigation starts a local draft for the selected Registry system.
+  // Actual saved task/sprint recovery requires a backend endpoint.
+  openScrumTaskReview()
+  if (stage === 'modules') {
+    scrumReviewTab.value = 'modules'
+  } else if (stage === 'planning' || stage === 'kanban') {
+    scrumTaskReviewOpen.value = false
+    openScrumPlanning()
+    if (stage === 'kanban') {
+      $q.notify({ type: 'info', message: 'Plan at least one task in a sprint before opening Kanban.' })
+    }
+  }
+  const query = { ...deliveryRoute.query }
+  delete query.projectDelivery
+  delete query.deliveryStage
+  await deliveryRouter.replace({ path: deliveryRoute.path, query }).catch(() => {})
+}
+
+// Local, system-scoped delivery progress for the Scrum Planning workspace.
+// No Registry API endpoint currently persists review, sprint or Kanban progress.
+function recordLocalDeliveryProgress(): void {
+  const systemId = editingId.value
+  if (systemId == null || !scrumTasks.value.length) return
+  const tasks = scrumTasks.value
+  const storyGroups = scrumStoryCatalog.value.map(story => tasks.filter(task => task.userStory === story))
+  const moduleGroups = scrumModuleCatalog.value.map(module => tasks.filter(task => task.module === module))
+  const planned = tasks.filter(task => task.sprintId !== null)
+  const complete = (items: ScrumDemoTask[]) => items.length > 0 && items.every(task => task.review === 'approved')
+  const stages = [
+    { done: storyGroups.filter(complete).length, total: storyGroups.length },
+    { done: moduleGroups.filter(complete).length, total: moduleGroups.length },
+    { done: planned.length, total: tasks.length },
+    { done: planned.filter(task => scrumKanbanStatuses.value[task.id] === 'done').length, total: planned.length },
+  ]
+  // Each stage contributes equally. Empty stages count as not started rather than complete.
+  const overall = Math.round(stages.reduce((sum, stage) => sum + (stage.total ? stage.done / stage.total : 0), 0) * 25)
+  try {
+    sessionStorage.setItem(`one-ictms-progress-v1:${systemId}`, JSON.stringify({
+      storiesDone: stages[0]!.done, storiesTotal: stages[0]!.total,
+      modulesDone: stages[1]!.done, modulesTotal: stages[1]!.total,
+      planned: stages[2]!.done, tasksTotal: stages[2]!.total,
+      kanbanDone: stages[3]!.done, kanbanTotal: stages[3]!.total,
+      overall,
+    }))
+    // My Tasks is scoped to the signed-in account and the currently selected system.
+    // Frontend preview only: no assignment information is persisted to the API.
+    const viewerId = Number(auth.user?.id)
+    if (Number.isSafeInteger(viewerId) && viewerId > 0) {
+      const ownedTasks = tasks.filter(task => scrumTaskAssignees.value[task.id] === viewerId && task.sprintId !== null)
+      const sprintById = new Map(scrumSprints.value.map(sprint => [sprint.id, sprint]))
+      const snapshot = {
+        systemId,
+        systemName: form.value.system_name || `System #${systemId}`,
+        tasks: ownedTasks.map(task => {
+          const sprint = sprintById.get(task.sprintId!)
+          return {
+            id: task.id, title: task.title, module: task.module, category: task.category,
+            description: task.description, priority: task.priority, points: task.points,
+            estimatedHours: task.estimatedHours, dependencies: task.dependencies,
+            userStory: task.userStory, acceptanceCriteria: task.acceptanceCriteria,
+            sprintId: task.sprintId, sprintName: sprint?.name || 'Sprint',
+            startDate: sprint?.startDate || '', endDate: sprint?.endDate || '',
+            status: scrumKanbanStatuses.value[task.id] || 'todo',
+          }
+        }),
+      }
+      sessionStorage.setItem(`one-ictms-my-tasks-v1:${viewerId}:${systemId}`, JSON.stringify(snapshot))
+      window.dispatchEvent(new Event('one-ictms-my-tasks-updated'))
+    }
+  } catch { /* Local storage may be disabled; don't block the workflow. */ }
+}
+watch([scrumTasks, scrumStoryCatalog, scrumModuleCatalog, scrumKanbanStatuses, scrumTaskAssignees, scrumSprints],
+  recordLocalDeliveryProgress, { deep: true })
+
 onMounted(() => {
   // Registry list is its own request. Only load two libraries required for table labels.
   // Defer the other seven dropdown libraries until a user opens the registration form.
   void loadRegistries()
   void Promise.allSettled([library.load('departments'), library.load('registryStatuses')])
+  void openProjectDeliveryFromRoute()
 })
 </script>
 

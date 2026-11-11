@@ -25,6 +25,7 @@
         <q-item clickable v-ripple to="/dashboard" exact><q-item-section avatar><q-icon name="space_dashboard" /></q-item-section><q-item-section>Overview</q-item-section></q-item>
         <q-item clickable v-ripple to="/system-registry"><q-item-section avatar><q-icon name="dns" /></q-item-section><q-item-section>System Registry</q-item-section></q-item>
         <q-item clickable v-ripple to="/scrum-planning"><q-item-section avatar><q-icon name="view_kanban" /></q-item-section><q-item-section>Scrum Planning</q-item-section></q-item>
+        <q-item clickable v-ripple to="/my-tasks"><q-item-section avatar><q-icon name="assignment_ind" /></q-item-section><q-item-section>My Tasks</q-item-section></q-item>
         <q-item clickable v-ripple to="/account"><q-item-section avatar><q-icon name="person_outline" /></q-item-section><q-item-section>My account</q-item-section></q-item>
         <q-item clickable v-ripple to="/change-password"><q-item-section avatar><q-icon name="lock_outline" /></q-item-section><q-item-section>Security</q-item-section></q-item>
       </q-list>
