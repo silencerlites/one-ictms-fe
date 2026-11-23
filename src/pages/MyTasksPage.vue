@@ -154,7 +154,6 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useQuasar } from 'quasar'
 import { useAuthStore } from '@/stores/auth'
 
 type TaskStatus = 'todo' | 'progress' | 'review' | 'done'
@@ -168,7 +167,6 @@ type AssignedTask = {
 type TaskSnapshot = { systemId: number; systemName: string; tasks: AssignedTask[] }
 
 const auth = useAuthStore()
-const $q = useQuasar()
 const selectedTask = ref<AssignedTask | null>(null)
 const previewTab = ref('details')
 function openTaskPreview(task: AssignedTask): void { selectedTask.value = task; previewTab.value = 'details' }

@@ -2,7 +2,7 @@ import axios from 'axios'
 import type { AxiosError } from 'axios'
 
 export const http = axios.create({
-  baseURL: import.meta.env.QCLI_API_URL || 'http://127.0.0.1:8000',
+  baseURL: import.meta.env.QCLI_API_URL || 'http://localhost:8000',
   withCredentials: true,
   withXSRFToken: true,
   xsrfCookieName: 'XSRF-TOKEN',
